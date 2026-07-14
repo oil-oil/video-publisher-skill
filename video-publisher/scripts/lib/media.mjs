@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 export const DOUYIN_MAX_DURATION_SECONDS = 15 * 60;
+export const DOUYIN_DURATION_CONTAINER_TOLERANCE_SECONDS = 0.1;
 
 const ISO_BMFF_EXTENSIONS = new Set([".mp4", ".m4v", ".mov"]);
 
@@ -112,10 +113,11 @@ export function validateMediaForPlatform(pkg, platform, media = inspectMediaFile
   }
   if (platform === "douyin"
     && media.durationSeconds !== null
-    && media.durationSeconds > DOUYIN_MAX_DURATION_SECONDS) {
+    && media.durationSeconds > DOUYIN_MAX_DURATION_SECONDS + DOUYIN_DURATION_CONTAINER_TOLERANCE_SECONDS) {
     errors.push(
       `DOUYIN_DURATION_LIMIT: video duration is ${media.durationSeconds.toFixed(3)}s; `
-      + `the real-tested maximum is ${DOUYIN_MAX_DURATION_SECONDS}s (15:00). `
+      + `the real-tested content maximum is ${DOUYIN_MAX_DURATION_SECONDS}s (15:00), `
+      + `with ${DOUYIN_DURATION_CONTAINER_TOLERANCE_SECONDS.toFixed(3)}s allowed for container rounding. `
       + "Edit or export a shorter source before browser upload.",
     );
   }

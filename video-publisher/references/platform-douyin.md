@@ -8,7 +8,7 @@ Use the 1-5 topic entities supplied by `douyinTopics`, in order. Do not inject a
 
 ## Draft And Editor Recovery
 
-Before opening Ego Lite, read MP4/M4V/MOV duration from its ISO BMFF `mvhd` metadata. Reject a source longer than 900 seconds with `DOUYIN_DURATION_LIMIT`. This boundary is real-tested: a 15:09 HEVC source produced two explicit platform upload failures, while a 14:59 stream copy from the same file, with the same codec, resolution, frame rate, bitrate, and near-identical 1.11 GB size, uploaded successfully. Do not auto-trim or transcode; ask for a shorter export. Do not apply this Douyin-only limit to other platforms.
+Before opening Ego Lite, read MP4/M4V/MOV duration from its ISO BMFF `mvhd` metadata. Reject content longer than 900 seconds with `DOUYIN_DURATION_LIMIT`, allowing only 0.1 seconds for container-metadata rounding. This boundary is real-tested: a 15:09 HEVC source produced two explicit platform upload failures, a 14:59 stream copy from the same file uploaded successfully, and an exact 15:00 stream copy reported 900.010 seconds yet also uploaded successfully. All three kept the same codec, resolution, frame rate, bitrate, and approximately 1.11 GB size. Do not auto-trim or transcode; ask for a shorter export. Do not apply this Douyin-only limit to other platforms.
 
 If the upload page asks whether to continue the last unpublished video, discard that stale upload before starting the confirmed target. Use a real visible click; do not treat hidden dialog text as active.
 
@@ -75,3 +75,5 @@ This path passed fresh 308 MB, 208 MB, 731 MB, and 533 MB real draft runs on 202
 A later 534 MB run deleted the ready Douyin task space. The same job created a replacement numeric space, re-uploaded and rebuilt only Douyin, produced fresh distinct portrait and landscape cover receipts, preserved the other three ready drafts, and passed repeated no-op verification.
 
 A 1.12 GB default-cover regression then isolated the 15-minute duration boundary: 15:09 failed explicitly twice, while the 14:59 near-equivalent source reached `READY` and stayed no-op `READY` for three reruns. The production preflight now blocks the known-invalid source before any browser work.
+
+An exact 15:00 stream copy reported 900.010 seconds in ISO BMFF metadata, uploaded on the first diagnostic attempt, and passed exact metadata, five topics, settings, default-cover, final-button, and safety verification. After the 0.1-second tolerance was added, the production orchestrator repeated the upload in a fresh task space, reached `READY`, and passed three no-op reruns. The tolerance exists only for this verified container-rounding behavior.

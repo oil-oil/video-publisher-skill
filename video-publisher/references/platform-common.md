@@ -168,3 +168,5 @@ Never fake topic/entity HTML. Use the visible editor, real suggestion row, and a
 Unit tests may prove scheduler barriers, persistence, and gate evaluation. Only a real creator-page run can accept selectors, topic entities, declaration dialogs, settings, draft quarantine, and cover flows.
 
 On 2026-07-14, the production scheduler passed a real four-platform run with four parallel uploads, serialized mutation, persisted task-space/cover state, interruption recovery, and four parallel fresh verifiers all `READY` before the final publish controls.
+
+On 2026-07-15, a later regression terminated the orchestrator during serialized Douyin topic insertion after every video upload had completed. Recovery found the exact title/body and two of five real topic entities, performed no video upload, safely rebuilt the partial rich editor, completed the remaining platforms, and reached four-platform `READY` plus three no-op reruns.

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   CONFIG_PLATFORMS,
+  ORIGINALITY_POLICIES,
   configStatus,
   createOnboardedConfig,
   resolveConfigPath,
@@ -29,6 +30,7 @@ function usage() {
     "Other options:",
     "  --locale <locale>",
     "  --copy-style <text>",
+    "  --originality-policy <ask_each_run|all_videos_original>",
     "  --check-concurrency <integer>",
     "  --upload-concurrency <integer>",
     "  --upload-existing-cover-by-default",
@@ -37,7 +39,7 @@ function usage() {
 
 function parseOptions(argv) {
   const repeatable = new Set(["--platform", "--recurring-tag", "--douyin-topic", "--bilibili-auto-tag"]);
-  const single = new Set(["--source-dir", "--locale", "--copy-style", "--check-concurrency", "--upload-concurrency"]);
+  const single = new Set(["--source-dir", "--locale", "--copy-style", "--originality-policy", "--check-concurrency", "--upload-concurrency"]);
   const boolean = new Set(["--upload-existing-cover-by-default"]);
   const result = {};
   for (let index = 0; index < argv.length; index += 1) {
@@ -82,6 +84,10 @@ try {
     const defaultPlatforms = options["--platform"] || [...CONFIG_PLATFORMS];
     const unsupported = defaultPlatforms.filter(platform => !CONFIG_PLATFORMS.includes(platform));
     if (unsupported.length) throw new Error(`unsupported platform: ${unsupported.join(", ")}`);
+    const originalityPolicy = options["--originality-policy"] || "ask_each_run";
+    if (!ORIGINALITY_POLICIES.includes(originalityPolicy)) {
+      throw new Error(`--originality-policy must be one of: ${ORIGINALITY_POLICIES.join(", ")}`);
+    }
     const config = createOnboardedConfig({
       locale: options["--locale"] || "zh-CN",
       sourceDirectory,
@@ -90,6 +96,7 @@ try {
         copyStyle: options["--copy-style"] || "clear, conversational, specific, non-hype",
         recurringTags: options["--recurring-tag"] || [],
       },
+      declarations: { originalityPolicy },
       platforms: {
         douyin: { defaultTopics: options["--douyin-topic"] || [] },
         bilibili: { allowedAutoTags: options["--bilibili-auto-tag"] || [] },

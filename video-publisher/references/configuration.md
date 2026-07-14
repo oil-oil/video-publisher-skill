@@ -28,6 +28,7 @@ copy style: clear, conversational, specific, non-hype
 recurring tags: empty
 Douyin default topics: empty, maximum 5
 Bilibili allowed automatic tags: empty
+originality policy: ask_each_run (choose all_videos_original only when every video may truthfully receive that declaration)
 check/upload concurrency: 4/4
 upload an existing cover by default: false
 ```
@@ -43,7 +44,8 @@ node scripts/config.mjs onboard \
   --platform wechat_channels \
   --recurring-tag "Tutorial" \
   --douyin-topic "Tutorial" \
-  --bilibili-auto-tag "Platform generated tag"
+  --bilibili-auto-tag "Platform generated tag" \
+  --originality-policy all_videos_original
 ```
 
 Then run `node scripts/config.mjs validate`. Continue only after it exits successfully.
@@ -64,6 +66,9 @@ Then run `node scripts/config.mjs validate`. Continue only after it exits succes
   "contentProfile": {
     "copyStyle": "clear, conversational, specific, non-hype",
     "recurringTags": []
+  },
+  "declarations": {
+    "originalityPolicy": "ask_each_run"
   },
   "platforms": {
     "douyin": { "defaultTopics": [] },
@@ -90,4 +95,6 @@ per-user configuration
 generic Skill default
 ```
 
-Configuration may store reusable preferences, not credentials or one-run authority. Never persist cookies, tokens, passwords, video-specific paths, originality confirmation, or permission to click the final publish control.
+Configuration may store reusable preferences and the explicitly onboarded standing originality policy. `ask_each_run` requires `--confirm-original-rights` for each mutating run; `all_videos_original` allows the maintained workflow to apply truthful original/self-made declarations without asking again. Never infer or silently upgrade this value.
+
+Never persist cookies, tokens, passwords, video-specific paths, or permission to click the final publish control. Originality policy and final-publish authorization are separate: the latter always requires an explicit current-run instruction.

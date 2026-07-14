@@ -40,7 +40,7 @@ Verify the enabled toggle from a fresh inspection. A click attempt is insufficie
 
 Default to the platform cover unless the package explicitly enables an existing-cover upload. Use the user-provided `3:4` asset.
 
-The tested editor entry is the real preview control under `.default.row` or `.default.column`. Upload through the image input, choose the crop ratio matching the asset when exposed, and confirm the editor.
+The tested editor entry is the real preview control under `.default.row` or `.default.column`. Open it with a real browser click, then poll for a visible `上传封面` tab instead of assuming a fixed render delay; one clean reopen is allowed when the asynchronous dialog does not materialize. Upload through the image input, choose the crop ratio matching the asset when exposed, and confirm the editor.
 
 Accept the cover only when the main editor exposes the uploaded preview URL, normally on `ros-preview.xhscdn.com`, and no cover dialog blocks the page. Store that URL in the receipt and require the verify phase to find it again.
 
@@ -59,4 +59,4 @@ visible enabled 发布 button
 visible enabled `发布笔记` final button; final publish not clicked
 ```
 
-This path passed a real draft run on 2026-07-14.
+This path passed a real draft run on 2026-07-14. The visible-tab polling path was then fault-tested by discarding the receipt and re-uploading the same 3:4 asset; it succeeded on the first maintained-run attempt and remained verifiable across subsequent four-platform runs.

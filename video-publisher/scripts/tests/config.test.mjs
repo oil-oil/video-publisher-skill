@@ -33,6 +33,7 @@ test("missing or empty configuration requires onboarding", async () => {
   const empty = configStatus(configPath);
   assert.equal(empty.empty, true);
   assert.equal(empty.onboardingRequired, true);
+  assert.equal(empty.config.declarations.originalityPolicy, "ask_each_run");
   await fs.promises.rm(root, { recursive: true, force: true });
 });
 
@@ -44,6 +45,7 @@ test("completed onboarding writes a valid private per-user configuration", async
     sourceDirectory: root,
     defaultPlatforms: ["douyin", "bilibili"],
     contentProfile: { recurringTags: ["Tutorial"] },
+    declarations: { originalityPolicy: "all_videos_original" },
     platforms: {
       douyin: { defaultTopics: ["Tutorial"] },
       bilibili: { allowedAutoTags: [] },
@@ -54,6 +56,7 @@ test("completed onboarding writes a valid private per-user configuration", async
   assert.equal(ready.onboardingRequired, false);
   assert.deepEqual(ready.config.defaultPlatforms, ["douyin", "bilibili"]);
   assert.deepEqual(ready.config.platforms.douyin.defaultTopics, ["Tutorial"]);
+  assert.equal(ready.config.declarations.originalityPolicy, "all_videos_original");
   assert.equal(fs.statSync(configPath).mode & 0o777, 0o600);
   await fs.promises.rm(root, { recursive: true, force: true });
 });
@@ -70,6 +73,7 @@ test("onboarding CLI persists repeated platform and topic options", async () => 
     "--recurring-tag", "Tutorial",
     "--douyin-topic", "Tutorial",
     "--bilibili-auto-tag", "Platform tag",
+    "--originality-policy", "all_videos_original",
   ], { env: { ...process.env, VIDEO_PUBLISHER_CONFIG: configPath } });
   assert.equal(result.code, 0, `${result.stderr}\n${result.stdout}`);
   const output = JSON.parse(result.stdout);
@@ -77,5 +81,6 @@ test("onboarding CLI persists repeated platform and topic options", async () => 
   assert.deepEqual(output.config.defaultPlatforms, ["douyin", "bilibili"]);
   assert.deepEqual(output.config.platforms.douyin.defaultTopics, ["Tutorial"]);
   assert.deepEqual(output.config.platforms.bilibili.allowedAutoTags, ["Platform tag"]);
+  assert.equal(output.config.declarations.originalityPolicy, "all_videos_original");
   await fs.promises.rm(root, { recursive: true, force: true });
 });

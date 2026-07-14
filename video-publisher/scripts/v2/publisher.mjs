@@ -36,6 +36,7 @@ function parseArgs(argv) {
   const options = {
     inspectOnly: false,
     originalRightsConfirmed: false,
+    originalityPolicy: config.declarations.originalityPolicy,
     stateRoot: DEFAULT_ROOT,
     jobId: "",
     checkConcurrency: config.execution.checkConcurrency,
@@ -107,8 +108,9 @@ async function main() {
     if (errors.length) throw new Error(`Package preflight failed for ${platform}: ${errors.join("; ")}`);
   }
   const rightsTargets = args.platforms.filter(platform => RIGHTS_PLATFORMS.has(platform));
-  if (!args.inspectOnly && rightsTargets.length && !args.originalRightsConfirmed) {
-    throw new UsageError(`Current-run originality confirmation is required before browser mutation for: ${rightsTargets.join(", ")}. Re-run only after the user confirms, adding --confirm-original-rights; this authority is never persisted.`);
+  const standingOriginalityPolicy = args.originalityPolicy === "all_videos_original";
+  if (!args.inspectOnly && rightsTargets.length && !standingOriginalityPolicy && !args.originalRightsConfirmed) {
+    throw new UsageError(`Originality confirmation is required before browser mutation for: ${rightsTargets.join(", ")}. Complete onboarding with declarations.originalityPolicy=all_videos_original, or confirm this run and add --confirm-original-rights.`);
   }
   const identity = await buildIdentity(pkg);
   const jobId = args.jobId || identity.fingerprint.slice(0, 16);

@@ -15,19 +15,19 @@ At the start of every invocation, before inspecting a video or opening a browser
 node scripts/config.mjs status
 ```
 
-If `onboardingRequired` is `true`, stop the publishing flow and onboard the user. Ask only for the source directory, default platforms, copy/tag preferences, Douyin default topics, and Bilibili automatic-tag allowlist; keep concurrency `4/4` and platform cover as proposed defaults unless the user changes them. Save with `scripts/config.mjs onboard`, run `status` again, and continue only when `onboardingRequired` is `false`.
+If `onboardingRequired` is `true`, stop the publishing flow and onboard the user. Ask only for the source directory, default platforms, copy/tag preferences, Douyin default topics, Bilibili automatic-tag allowlist, and whether every video may truthfully be declared original; keep concurrency `4/4` and platform cover as proposed defaults unless the user changes them. Save with `scripts/config.mjs onboard`, run `status` again, and continue only when `onboardingRequired` is `false`.
 
 Configuration is per user at `$XDG_CONFIG_HOME/video-publisher/config.json`, or `$HOME/.config/video-publisher/config.json`. `VIDEO_PUBLISHER_CONFIG` overrides the path. Never put a user's configuration inside the shareable Skill folder.
 
-An explicit current request overrides the package; explicit package fields override configuration defaults. Never persist login state, video-specific rights confirmation, or final-publish authorization. Read `references/configuration.md` for the schema and onboarding command.
+An explicit current request overrides the package; explicit package fields override configuration defaults. The onboarding configuration may persist the user's truthful standing originality policy, but never login state, video-specific paths, or final-publish authorization. Read `references/configuration.md` for the schema and onboarding command.
 
 ## Safety Boundary
 
 Never click the final `发布`, `发布笔记`, `发表`, or `立即投稿` control unless the user explicitly authorizes publishing in the current run. Uploading and preparing a draft do not imply permission to publish. The maintained runner mounts a page-level capture guard for all four labels; `READY` requires evidence that the guard is armed and that it blocked zero attempts.
 
-Before enabling any `原创`, `自制`, or equivalent rights declaration, obtain confirmation in the current run that the video and declaration are truthful. If the user cannot confirm that, stop: non-original declaration modes are outside the current live-tested boundary.
+Before enabling any `原创`, `自制`, or equivalent declaration, require one of two truthful signals: the onboarded `declarations.originalityPolicy` is `all_videos_original`, or the user confirms the current video and the run passes `--confirm-original-rights`. Never infer either signal from the video itself. If neither is available, stop: non-original declaration modes are outside the current live-tested boundary.
 
-Pass `--confirm-original-rights` to the maintained runner only after that confirmation. The runner refuses mutating runs for Xiaohongshu, Bilibili, or WeChat Channels without it. Never persist or infer this one-run flag; interrupted/resumed runs require fresh current-run confirmation.
+Treat `all_videos_original` as a reusable content policy, not permission to publish. The final publish controls still require explicit authorization in the current run and that authority is never persisted. `ask_each_run` remains the generic onboarding default for shared installations.
 
 Stop only when every selected platform is either:
 
@@ -121,7 +121,7 @@ Distinguish “some video is uploaded” from “the target video is uploaded”
 
 ## Content Package
 
-Use the onboarded configuration as defaults, then confirm the source video, platform selection, title, tags, rights/declaration status, and existing-cover upload intent before browser automation. Newlines in JSON fields must be real newline characters.
+Use the onboarded configuration as defaults, then confirm the source video, platform selection, title, tags, any unresolved rights/declaration status, and existing-cover upload intent before browser automation. Newlines in JSON fields must be real newline characters.
 
 Use platform-native defaults:
 
@@ -175,6 +175,8 @@ As of 2026-07-14:
 - WeChat Channels passed full upload completion, exact description, empty short title, original declaration, distinct 3:4 personal-profile and 4:3 share-card custom-cover receipts, stale cover-editor recovery, independent verification, dialog and final-button checks. The upload and cover inputs both require CDP object-id injection inside Wujie open roots.
 
 The production orchestrator then passed a real four-platform regression with upload concurrency `4`, UI concurrency `1`, persisted receipts, interruption recovery, and a final parallel verify in which all four platforms returned `READY`. No final publish control was clicked.
+
+The onboarded `all_videos_original` policy also passed real mutation without `--confirm-original-rights`. After a targeted Xiaohongshu cover receipt reset, the maintained runner re-uploaded the 3:4 asset on its first attempt; three immediate full four-platform reruns then remained `READY` with no upload or UI mutation work.
 
 A passing platform-specific diagnostic still does not replace this system-level regression when scheduler, persistence, or shared-browser behavior changes.
 

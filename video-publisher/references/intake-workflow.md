@@ -15,7 +15,7 @@ If the link points to an already-published creator platform post, treat it as a 
 
 Before any browser upload, verify the local file exists with `ls -lh` or `test -f`.
 
-Before selecting any `原创`, `自制`, or equivalent declaration, ask the user to confirm in the current run that the video qualifies. If not confirmed, stop before mutation; do not guess or reuse a prior run's answer.
+Before selecting any `原创`, `自制`, or equivalent declaration, require the onboarded `declarations.originalityPolicy` to be `all_videos_original`, or obtain current-video confirmation and pass the one-run `--confirm-original-rights` override. Never infer eligibility from the filename or content. Treat this declaration signal separately from final-publish authorization.
 
 If the exact path does not exist:
 

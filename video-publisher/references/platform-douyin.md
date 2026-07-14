@@ -10,17 +10,19 @@ Use the 1-5 topic entities supplied by `douyinTopics`, in order. Do not inject a
 
 If the upload page asks whether to continue the last unpublished video, discard that stale upload before starting the confirmed target. Use a real visible click; do not treat hidden dialog text as active.
 
-Clear the rich description editor with real focus, a programmatic selection, and real Backspace. Direct value replacement can leave duplicated framework state.
+Treat a visible `上传失败，重新上传` state as terminal evidence for the current upload attempt. Clear the file input, retry the same verified local asset once in the same run, and record the attempt count. Do not spend the whole processing timeout waiting after explicit failure. A second explicit failure is `PLATFORM_REJECTED_ASSET`; a progress state that simply stops advancing remains `UPLOAD_STALLED`.
+
+Clear the rich description editor with a real click inside the editor followed by real `Meta+A` and Backspace, then verify it is empty before rebuilding content. Direct value replacement or DOM-only selection can leave duplicated framework state.
 
 ## Topic Entities
 
 For each topic:
 
-1. Focus the description at the end.
+1. Resolve the last text node in the editor and real-click its endpoint; do not use a guessed top-right coordinate.
 2. Click the real `#添加话题` control.
 3. Insert the bare topic through CDP `Input.insertText`.
 4. Click the exact leaf suggestion row.
-5. Verify a committed topic entity before continuing.
+5. Press real ArrowRight to leave the committed entity, insert one separator space, and verify the entity before continuing.
 
 Accept the platform’s official activity entity form and exact selected `#话题` form. Reject plain hashtag residue and duplicates.
 
@@ -60,4 +62,4 @@ visible enabled 发布 button
 final publish not clicked
 ```
 
-This path passed a fresh real draft run on 2026-07-14.
+This path passed a fresh 308 MB real draft run on 2026-07-14, including recovery from an explicit upload failure, exact reconstruction of a previously corrupted rich description, and repeated no-op verification.

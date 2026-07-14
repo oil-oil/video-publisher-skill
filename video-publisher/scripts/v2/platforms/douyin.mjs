@@ -226,14 +226,15 @@ const normalizeDouyinTopic = value => String(value || '').replace(/^#/, '').repl
 
 async function inspectDouyinTrailingPlainText() {
   await locateDouyinEditor();
-  return await js(String.raw`(() => {
+  return await js(String.raw`((expectedDescription) => {
     const editor=document.querySelector('#vp2-douyin-editor');if(!editor)return {ok:false,reason:'douyin editor missing during tail inspection'}
     const walker=document.createTreeWalker(editor,NodeFilter.SHOW_TEXT);let node,lastPlain=null
     while((node=walker.nextNode())){if(!node.parentElement?.closest('[data-mention], [contenteditable="false"]')&&String(node.nodeValue||'').replace(/\u200b/g,'').length)lastPlain=node}
-    const value=String(lastPlain?.nodeValue||'').replace(/\u200b/g,'')
-    const entities=[...editor.querySelectorAll('[data-mention="#"], [data-mention="activity"]')].map(el=>String(el.innerText||el.textContent||'').replace(/^#/,'').replace(/\s+/g,'').toLowerCase()).filter(Boolean)
+    let value=String(lastPlain?.nodeValue||'').replace(/\u200b/g,'')
+    if(expectedDescription&&value.startsWith(expectedDescription))value=value.slice(expectedDescription.length)
+    const entities=[...editor.querySelectorAll('[data-mention="#"], [data-mention="activity"]')].map(el=>String(el.innerText||el.textContent||'').replace(/[\s\u200b\u00a0]+/g,'').replace(/^#/,'').toLowerCase()).filter(Boolean)
     return {ok:true,value,trimmed:value.trim(),entities,editorText:String(editor.innerText||editor.textContent||'')}
-  })()`);
+  })(${JSON.stringify(douyinDescription)})`);
 }
 
 async function removeDouyinTrailingTopicQuery(tag, expectedCommitted = []) {
@@ -241,7 +242,14 @@ async function removeDouyinTrailingTopicQuery(tag, expectedCommitted = []) {
   const before=await inspectDouyinTrailingPlainText();
   if(!before.ok)return before;
   const initial=String(before.trimmed||'').toLowerCase();
-  if(!initial)return {ok:true,alreadyClean:true,before};
+  if(!initial){
+    const after=await inspectDouyin();
+    const selected=after.gates.tags.evidence?.selected||[];
+    const entitiesUnchanged=selected.length===expectedCommitted.length&&selected.every((value,index)=>normalizeDouyinTopic(value)===normalizeDouyinTopic(expectedCommitted[index]));
+    return after.gates.description.ok&&entitiesUnchanged
+      ? {ok:true,alreadyClean:true,before}
+      : {ok:false,reason:'douyin empty topic tail did not preserve exact prose and committed entities',description:after.gates.description.evidence,selected,expectedCommitted};
+  }
   if(!initial.startsWith('#')||!expected.startsWith(initial))return {ok:false,reason:'douyin trailing text is not a provable prefix of the failed topic query',expected,actual:before.trimmed,evidence:before};
   const focused=await focusDouyinEditorEnd();if(!focused.ok)return focused;
   const snapshots=[];
@@ -308,7 +316,7 @@ async function addDouyinTopic(tag) {
 async function recoverDouyinTopicPrefix(before) {
   const evidence=before.gates.tags.evidence||{};
   const selected=evidence.selected||[];
-  const validPrefix=selected.length>0&&selected.length<douyinTopics.length&&!evidence.duplicates?.length
+  const validPrefix=selected.length<douyinTopics.length&&!evidence.duplicates?.length
     &&selected.every((value,index)=>normalizeDouyinTopic(value)===normalizeDouyinTopic(douyinTopics[index]));
   const editorText=String(evidence.editorText||before.gates.description.evidence?.editorText||'').replace(/\s+/g,' ').trim();
   const descriptionPrefix=editorText.startsWith(String(douyinDescription||'').replace(/\s+/g,' ').trim());

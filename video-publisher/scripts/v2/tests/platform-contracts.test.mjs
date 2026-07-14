@@ -34,6 +34,7 @@ test("Douyin preserves committed topic entities while retrying a failed tail que
   const add = source.slice(cleanupEnd, addEnd);
   assert.match(cleanup, /expected\.startsWith\(initial\)/, "cleanup must prove the visible tail belongs to the missing topic");
   assert.match(cleanup, /entitiesUnchanged/, "cleanup must verify existing topic entities were preserved");
+  assert.match(source, /value\.startsWith\(expectedDescription\)/, "the first topic query must be isolated from a shared description text node");
   assert.match(add, /attempt<=3/, "suggestion lookup must use a finite retry bound");
   assert.match(add, /removeDouyinTrailingTopicQuery\(queryTag,committedBefore\)/, "a failed lookup must remove only its own plain query");
 });

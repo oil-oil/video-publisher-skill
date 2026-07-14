@@ -69,3 +69,5 @@ final publish not clicked
 ```
 
 This path passed fresh 308 MB, 208 MB, 731 MB, and 533 MB real draft runs on 2026-07-14 and 2026-07-15, including interrupted-upload takeover without reinjection, recovery from explicit upload failures, exact reconstruction of corrupted rich descriptions, whitespace-normalized topic lookup, a long Chinese title that initially lost a character, topic words repeated in prose, delayed landscape-cover receipt repair, checkpoint recovery, and repeated no-op verification.
+
+A later 534 MB run deleted the ready Douyin task space. The same job created a replacement numeric space, re-uploaded and rebuilt only Douyin, produced fresh distinct portrait and landscape cover receipts, preserved the other three ready drafts, and passed repeated no-op verification.

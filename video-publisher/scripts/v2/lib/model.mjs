@@ -82,7 +82,20 @@ export function evaluateObservation(observation) {
     throw new Error("Invalid platform observation");
   }
   const required = requiredGates(observation.platform);
-  const missing = required.filter(name => observation.gates?.[name]?.ok !== true);
+  const gates = { ...(observation.gates || {}) };
+  const safetyEvidence = gates.safety?.evidence || {};
+  const safetyVerified = gates.safety?.ok === true
+    && safetyEvidence.finalPublishClicked === false
+    && safetyEvidence.guardArmed === true
+    && safetyEvidence.blockedAttempts === 0;
+  if (!safetyVerified) {
+    gates.safety = {
+      ...(gates.safety || {}),
+      ok: false,
+      evidence: safetyEvidence,
+    };
+  }
+  const missing = required.filter(name => gates[name]?.ok !== true);
   const actionBlocker = normalizedBlocker(observation.blocker);
   const blocker = actionBlocker || (missing.length ? missingGateBlocker(observation, missing) : null);
   const ready = missing.length === 0 && blocker === null;
@@ -96,7 +109,7 @@ export function evaluateObservation(observation) {
     required,
     missing,
     blocker,
-    gates: observation.gates || {},
+    gates,
     evidence: observation.evidence || {},
   };
 }

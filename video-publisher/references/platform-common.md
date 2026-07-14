@@ -6,7 +6,7 @@ Read this file and the exact platform reference before changing a live adapter.
 
 One orchestrator owns all platform task spaces. Do not use sub Agents for live creator-page control.
 
-Never click a final `发布`, `发表`, or `立即投稿` button without explicit authorization in the current run. Every adapter result must leave `finalPublishClicked: false`.
+Never click a final `发布`, `发布笔记`, `发表`, or `立即投稿` button without explicit authorization in the current run. Every adapter result must leave `finalPublishClicked: false`. The shared core installs a capture-phase click/submit guard; safety passes only when `guardArmed: true` and `blockedAttempts: 0` are observed from the live page.
 
 If Ego reports that the user controls a task space, stop the whole browser job. Do not retry, create a replacement task space, or claim it without explicit user confirmation.
 
@@ -24,6 +24,8 @@ Use `scripts/run-safe-platforms.sh`, which invokes `scripts/v2/publisher.mjs`.
 ```
 
 Do not pipeline UI mutations behind unfinished uploads. Live testing showed that overlapping upload processes and UI control can freeze the shared Ego input channel even across isolated task spaces.
+
+The maintained adapter runner also takes an atomic per-platform filesystem lock. A second process targeting the same platform fails before opening Ego instead of overlapping with an active upload, mutation, inspection, or verification. Stale locks from dead processes are removed automatically. This still permits the intended four-platform parallel upload/check phases.
 
 ## Platform Phases
 
@@ -97,6 +99,8 @@ safety
 
 A mutation result is not enough. The final `verify` phase must re-read the page and match stored cover receipts.
 
+The production runner also writes accepted cover receipts to an atomic per-job, per-platform checkpoint. On restart, the orchestrator loads only checkpoints whose platform and package fingerprint match the current job, then performs the same fresh page verification. Checkpoints are recovery evidence, not a substitute for `verify`.
+
 ## Cover Receipts
 
 When custom covers are enabled, persist a receipt containing:
@@ -113,6 +117,8 @@ The verifier must find the accepted URL in the platform’s main cover card or p
 For WeChat Channels, only the main `.vertical-cover-wrap img.vertical-img-size` and `.horizon-cover-wrap img.horizon-img-size` card URLs count. Avatars, video-frame URLs elsewhere on the page, data-URL crop previews, and phone-preview mirrors are not receipts.
 
 Douyin requires separate portrait and landscape receipts with distinct accepted card URLs.
+
+If the page already contains two distinct Douyin custom covers but neither job state nor a matching checkpoint contains receipts, do not infer that the images are the requested assets and do not blindly re-upload them. Return a typed ambiguous-state blocker.
 
 ## Typed Blockers
 

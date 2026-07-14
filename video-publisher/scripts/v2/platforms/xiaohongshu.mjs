@@ -286,6 +286,7 @@ async function mutateXiaohongshu() {
   actions.cover = await uploadXhsCover();
   if (!actions.cover.ok) return { ...(await inspectXiaohongshu()), blocker: typedBlocker('PLATFORM_REJECTED_ASSET', actions.cover.reason, { retryable: true, evidence: actions.cover }) };
   const receipts = actions.cover.receipt ? { cover: actions.cover.receipt } : {};
+  actions.receiptCheckpoint = checkpointReceipts(receipts);
   const previousReceipts = expectedReceipts;
   expectedReceipts.cover = receipts.cover || expectedReceipts.cover;
   const after = await inspectXiaohongshu();

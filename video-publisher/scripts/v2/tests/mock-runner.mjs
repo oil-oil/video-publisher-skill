@@ -12,7 +12,7 @@ gates.authenticated = { ok: true, evidence: {} };
 gates.draftIdentity = { ok: true, evidence: {} };
 gates.noBlockingDialog = { ok: true, evidence: {} };
 gates.finalButton = { ok: true, evidence: { text: "final", disabled: false } };
-gates.safety = { ok: true, evidence: { finalPublishClicked: false } };
+gates.safety = { ok: true, evidence: { finalPublishClicked: false, guardArmed: true, blockedAttempts: 0 } };
 if (phase === "upload") gates.video = { ok: true, evidence: { stable: true } };
 const result = {
   schemaVersion: 1,

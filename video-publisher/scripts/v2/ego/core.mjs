@@ -12,6 +12,7 @@ const PLATFORM_HOSTS = {
   wechat_channels: /channels\.weixin\.qq\.com/,
 };
 const FINAL_TEXT = /^(发布|发布笔记|发表|立即投稿)$/;
+const FINAL_GUARD_KEY = '__VIDEO_PUBLISHER_FINAL_GUARD__';
 let activeTaskSpace = null;
 
 const compactText = value => String(value || '').replace(/\s+/g, ' ').trim();
@@ -67,10 +68,78 @@ async function selectPlatformTab() {
   return { ok: true, info };
 }
 
+async function armFinalPublishGuard() {
+  return await js(String.raw`((key, finalSource, finalFlags) => {
+    const existing = window[key]
+    if (existing?.armed === true && existing.version === 1) {
+      return { ok: true, armed: true, version: existing.version, armedAt: existing.armedAt, blockedAttempts: existing.blockedAttempts.length }
+    }
+    const finalText = new RegExp(finalSource, finalFlags)
+    const compact = value => String(value || '').replace(/\s+/g, ' ').trim()
+    const state = { armed: true, version: 1, armedAt: new Date().toISOString(), blockedAttempts: [] }
+    const buttonLabel = element => {
+      if (!(element instanceof Element)) return ''
+      const buttonish = element.matches('button, input[type="submit"], [role="button"], .d-button, .bcc-button')
+      if (!buttonish) return ''
+      return compact(element.value || element.getAttribute('aria-label') || element.innerText || element.textContent || '')
+    }
+    const guard = event => {
+      const candidates = [event.submitter, ...(typeof event.composedPath === 'function' ? event.composedPath() : []), event.target]
+      const match = candidates.map(element => ({ element, label: buttonLabel(element) })).find(item => finalText.test(item.label))
+      if (!match) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      state.blockedAttempts.push({ type: event.type, label: match.label, at: new Date().toISOString() })
+    }
+    document.addEventListener('click', guard, true)
+    document.addEventListener('submit', guard, true)
+    window[key] = state
+    return { ok: true, armed: true, version: state.version, armedAt: state.armedAt, blockedAttempts: 0 }
+  })(${JSON.stringify(FINAL_GUARD_KEY)}, ${JSON.stringify(FINAL_TEXT.source)}, ${JSON.stringify(FINAL_TEXT.flags)})`);
+}
+
+async function inspectFinalPublishGuard() {
+  return await js(String.raw`((key) => {
+    const state = window[key]
+    return state?.armed === true && state.version === 1
+      ? { armed: true, version: state.version, armedAt: state.armedAt, blockedAttempts: state.blockedAttempts.length, attempts: state.blockedAttempts.slice(-5) }
+      : { armed: false, version: state?.version || null, blockedAttempts: state?.blockedAttempts?.length || 0, attempts: state?.blockedAttempts?.slice?.(-5) || [] }
+  })(${JSON.stringify(FINAL_GUARD_KEY)})`);
+}
+
+function checkpointReceipts(receipts) {
+  if (!receiptCheckpointPath || !jobFingerprint || !receipts || !Object.keys(receipts).length) {
+    return { ok: false, skipped: true };
+  }
+  const payload = {
+    schemaVersion: 1,
+    platform,
+    fingerprint: jobFingerprint,
+    writtenAt: new Date().toISOString(),
+    receipts,
+  };
+  fs.mkdirSync(path.dirname(receiptCheckpointPath), { recursive: true });
+  const temp = `${receiptCheckpointPath}.${process.pid}.tmp`;
+  fs.writeFileSync(temp, JSON.stringify(payload, null, 2) + '\n');
+  fs.renameSync(temp, receiptCheckpointPath);
+  return { ok: true, path: receiptCheckpointPath, writtenAt: payload.writtenAt };
+}
+
 async function preparePlatform() {
   const task = await selectTaskSpace();
   const selected = await selectPlatformTab();
-  return { task, selected };
+  if (!selected.ok) return { task, selected };
+  const guard = await armFinalPublishGuard();
+  if (!guard.ok || !guard.armed) {
+    return {
+      task,
+      selected: {
+        ok: false,
+        blocker: typedBlocker('INPUT_CHANNEL_BROKEN', '最终发布按钮硬保护无法挂载', { retryable: true, evidence: guard }),
+      },
+    };
+  }
+  return { task, selected, guard };
 }
 
 async function pageRootsState() {
@@ -144,6 +213,11 @@ async function removeExactStaleMask(textPattern) {
 }
 
 async function emitObservation(observation) {
+  const guard = await inspectFinalPublishGuard().catch(error => ({
+    armed: false,
+    blockedAttempts: 0,
+    error: String(error?.message || error),
+  }));
   const payload = {
     schemaVersion: 1,
     platform,
@@ -154,9 +228,14 @@ async function emitObservation(observation) {
     finalPublishClicked: false,
     ...observation,
   };
-  // Safety is injected centrally. Platform adapters cannot accidentally claim it.
+  // Safety is injected centrally and backed by a page-level capture guard.
+  // A blocked attempt keeps the draft unpublished, but intentionally fails READY
+  // so accidental final-button interaction cannot pass unnoticed.
   payload.gates ||= {};
-  payload.gates.safety = okGate({ finalPublishClicked: false });
+  const safetyEvidence = { finalPublishClicked: false, guardArmed: guard.armed === true, blockedAttempts: guard.blockedAttempts || 0, attempts: guard.attempts || [], guardVersion: guard.version || null };
+  payload.gates.safety = guard.armed === true && guard.blockedAttempts === 0
+    ? okGate(safetyEvidence)
+    : failedGate(safetyEvidence);
   delete payload.ready;
   cliLog(V2_RESULT_PREFIX + JSON.stringify(payload));
   return payload;

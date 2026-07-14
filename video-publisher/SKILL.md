@@ -23,9 +23,11 @@ An explicit current request overrides the package; explicit package fields overr
 
 ## Safety Boundary
 
-Never click the final `发布`, `发表`, or `立即投稿` control unless the user explicitly authorizes publishing in the current run. Uploading and preparing a draft do not imply permission to publish.
+Never click the final `发布`, `发布笔记`, `发表`, or `立即投稿` control unless the user explicitly authorizes publishing in the current run. Uploading and preparing a draft do not imply permission to publish. The maintained runner mounts a page-level capture guard for all four labels; `READY` requires evidence that the guard is armed and that it blocked zero attempts.
 
 Before enabling any `原创`, `自制`, or equivalent rights declaration, obtain confirmation in the current run that the video and declaration are truthful. If the user cannot confirm that, stop: non-original declaration modes are outside the current live-tested boundary.
+
+Pass `--confirm-original-rights` to the maintained runner only after that confirmation. The runner refuses mutating runs for Xiaohongshu, Bilibili, or WeChat Channels without it. Never persist or infer this one-run flag; interrupted/resumed runs require fresh current-run confirmation.
 
 Stop only when every selected platform is either:
 
@@ -58,6 +60,8 @@ final verification: parallel, default 4
 The upload phase is a barrier: no UI mutation starts until every selected upload runner has exited. An upload runner may exit only after the platform proves completion. A preview card alone is insufficient when progress text, a percentage, processing text, or `取消上传` remains visible.
 
 Custom-cover dialogs also use the single UI queue. Isolated task spaces do not make concurrent clicking safe.
+
+Accepted cover receipts are written to atomic, fingerprint-bound checkpoints inside the job directory before an adapter returns. This closes the crash window between a successful creator-page mutation and the orchestrator recording its result. A resumed run still has to match the checkpoint against fresh page truth.
 
 ## Browser Rules
 

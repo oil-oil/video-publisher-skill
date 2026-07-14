@@ -20,6 +20,7 @@ import { runPool, SerialQueue } from "./lib/scheduler.mjs";
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = path.join(os.homedir(), ".video-publisher", "v2-jobs");
+const RIGHTS_PLATFORMS = new Set(["xiaohongshu", "bilibili", "wechat_channels"]);
 const validators = { xiaohongshu: validateXiaohongshuPackage, douyin: validateDouyinPackage, bilibili: validateBilibiliPackage, wechat_channels: validateWechatChannelsPackage };
 
 class UsageError extends Error {}
@@ -34,6 +35,7 @@ function parseArgs(argv) {
   const config = loadConfig({ requireOnboarded: true });
   const options = {
     inspectOnly: false,
+    originalRightsConfirmed: false,
     stateRoot: DEFAULT_ROOT,
     jobId: "",
     checkConcurrency: config.execution.checkConcurrency,
@@ -43,6 +45,7 @@ function parseArgs(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--inspect-only") { options.inspectOnly = true; continue; }
+    if (arg === "--confirm-original-rights") { options.originalRightsConfirmed = true; continue; }
     const setters = {
       "--state-root": value => { options.stateRoot = path.resolve(value); },
       "--job-id": value => { options.jobId = value; },
@@ -57,7 +60,7 @@ function parseArgs(argv) {
     if (arg.startsWith("--")) throw new UsageError(`Unknown option: ${arg}`);
     positional.push(arg);
   }
-  if (!positional.length) throw new UsageError("Usage: publisher.mjs <package.json> [task-suffix] [platform...] [--inspect-only]");
+  if (!positional.length) throw new UsageError("Usage: publisher.mjs <package.json> [task-suffix] [platform...] [--inspect-only|--confirm-original-rights]");
   const packagePath = path.resolve(positional.shift());
   let taskSuffix = "manual";
   if (positional.length && !PLATFORMS.includes(positional[0])) taskSuffix = positional.shift();
@@ -103,6 +106,10 @@ async function main() {
     const errors = validators[platform](pkg);
     if (errors.length) throw new Error(`Package preflight failed for ${platform}: ${errors.join("; ")}`);
   }
+  const rightsTargets = args.platforms.filter(platform => RIGHTS_PLATFORMS.has(platform));
+  if (!args.inspectOnly && rightsTargets.length && !args.originalRightsConfirmed) {
+    throw new UsageError(`Current-run originality confirmation is required before browser mutation for: ${rightsTargets.join(", ")}. Re-run only after the user confirms, adding --confirm-original-rights; this authority is never persisted.`);
+  }
   const identity = await buildIdentity(pkg);
   const jobId = args.jobId || identity.fingerprint.slice(0, 16);
   const jobDir = path.join(args.stateRoot, jobId);
@@ -110,14 +117,25 @@ async function main() {
   const state = await store.initialize();
   if (state.fingerprint !== identity.fingerprint) throw new Error(`Job ${jobId} belongs to another package`);
   for (const platform of args.platforms) state.platforms[platform] ||= { status: "new", taskSpaceId: null, receipts: {}, verdict: null, history: [] };
+  for (const platform of args.platforms) {
+    const checkpoint = await store.loadReceiptCheckpoint(platform, state.fingerprint);
+    if (checkpoint) state.platforms[platform].receipts = { ...checkpoint.receipts, ...(state.platforms[platform].receipts || {}) };
+  }
   state.status = args.inspectOnly ? "inspecting" : "running";
   await store.save();
 
   const runnerPath = path.resolve(process.env.VIDEO_PUBLISHER_V2_RUNNER || path.join(DIR, "run-platform.mjs"));
   async function invoke(platform, phase) {
     const item = state.platforms[platform];
-    const execution = await runCapture(process.execPath, [runnerPath, platform, args.packagePath, phase, `${args.taskSuffix}-${jobId}`, item.taskSpaceId ? String(item.taskSpaceId) : ""], {
-      env: { ...process.env, VIDEO_PUBLISHER_V2_RECEIPTS: JSON.stringify(item.receipts || {}) },
+    const runnerArgs = [runnerPath, platform, args.packagePath, phase, `${args.taskSuffix}-${jobId}`, item.taskSpaceId ? String(item.taskSpaceId) : ""];
+    if (args.originalRightsConfirmed) runnerArgs.push("--confirm-original-rights");
+    const execution = await runCapture(process.execPath, runnerArgs, {
+      env: {
+        ...process.env,
+        VIDEO_PUBLISHER_V2_RECEIPTS: JSON.stringify(item.receipts || {}),
+        VIDEO_PUBLISHER_V2_CHECKPOINT_PATH: store.receiptCheckpointPath(platform),
+        VIDEO_PUBLISHER_V2_FINGERPRINT: state.fingerprint,
+      },
     });
     const observation = parseV2Result(`${execution.stdout}\n${execution.stderr}`);
     if (observation.receipts) item.receipts = { ...(item.receipts || {}), ...observation.receipts };

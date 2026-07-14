@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { BLOCKER, classifyVerdict, evaluateObservation, requiredGates } from "../lib/model.mjs";
 
 function observation(platform, overrides = {}) {
-  const gates = Object.fromEntries(requiredGates(platform).map(name => [name, { ok: true, evidence: {} }]));
+  const gates = Object.fromEntries(requiredGates(platform).map(name => [name, {
+    ok: true,
+    evidence: name === "safety" ? { finalPublishClicked: false, guardArmed: true, blockedAttempts: 0 } : {},
+  }]));
   return { platform, phase: "verify", taskSpaceId: 1, gates: { ...gates, ...(overrides.gates || {}) }, blocker: overrides.blocker || null };
 }
 
@@ -34,4 +37,20 @@ test("typed risk-control blocker wins over otherwise missing gates", () => {
   }));
   assert.equal(verdict.ready, false);
   assert.equal(verdict.blocker.code, BLOCKER.RISK_CONTROL);
+});
+
+test("READY rejects a self-reported safety gate without an armed page guard", () => {
+  const verdict = evaluateObservation(observation("xiaohongshu", {
+    gates: { safety: { ok: true, evidence: { finalPublishClicked: false, guardArmed: false, blockedAttempts: 0 } } },
+  }));
+  assert.equal(verdict.ready, false);
+  assert.deepEqual(verdict.missing, ["safety"]);
+});
+
+test("READY rejects any attempted final-publish interaction even when it was blocked", () => {
+  const verdict = evaluateObservation(observation("xiaohongshu", {
+    gates: { safety: { ok: true, evidence: { finalPublishClicked: false, guardArmed: true, blockedAttempts: 1 } } },
+  }));
+  assert.equal(verdict.ready, false);
+  assert.deepEqual(verdict.missing, ["safety"]);
 });

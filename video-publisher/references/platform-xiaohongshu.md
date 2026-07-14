@@ -56,7 +56,7 @@ exact topic entities with no plain residue
 custom 3:4 receipt when enabled, otherwise default cover state
 no blocking dialog
 visible enabled 发布 button
-final publish not clicked
+visible enabled `发布笔记` final button; final publish not clicked
 ```
 
 This path passed a real draft run on 2026-07-14.

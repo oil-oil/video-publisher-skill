@@ -191,13 +191,69 @@ async function repairDelayedDouyinCoverReceipt(){
 }
 
 async function mutateDouyin() {
-  const before=await inspectDouyin();if(!before.gates.video.ok)return {...before,blocker:typedBlocker('STATE_AMBIGUOUS','抖音没有可修复的已上传视频')};
-  const actions={};if(!before.gates.title.ok){actions.title=await setDouyinTitle();if(!actions.title.ok)return {...(await inspectDouyin()),blocker:typedBlocker('ACTION_FAILED',actions.title.reason,{evidence:actions.title})};}
-  const bodyOkay=before.gates.description.ok&&before.gates.tags.ok;
-  if(!bodyOkay){actions.body=await clearAndFillDouyinBody();if(!actions.body.ok)return {...(await inspectDouyin()),blocker:typedBlocker('ACTION_FAILED',actions.body.reason)};for(const tag of douyinTopics){const added=await addDouyinTopic(tag);(actions.topics||=[]).push({tag,...added});if(!added.ok)return {...(await inspectDouyin()),blocker:typedBlocker('ACTION_FAILED',added.reason,{evidence:added})};}}
-  actions.settings=await turnOffDouyinSync();if(!actions.settings.ok)return {...(await inspectDouyin()),blocker:typedBlocker('SELECTOR_DRIFT',actions.settings.reason)};
-  const receipts={};if(douyinCustomCover){const repaired=await repairDelayedDouyinCoverReceipt();if(repaired.ok){actions.coverReceiptRepair={ok:true,reason:repaired.reason};receipts.cover=repaired.receipt;expectedReceipts.cover=receipts.cover}else{const beforeUrls=before.gates.cover.evidence?.urls||{};receipts.cover={slots:{}};for(const asset of douyinCoverAssets){const uploaded=await uploadDouyinCoverSlot(asset);(actions.covers||=[]).push({asset,...uploaded});if(!uploaded.ok)return {...(await inspectDouyin()),blocker:typedBlocker('PLATFORM_REJECTED_ASSET',uploaded.reason,{retryable:true,evidence:uploaded})};}let coverState=null;for(let attempt=0;attempt<45;attempt+=1){coverState=await inspectDouyin();const portrait=coverState.gates.cover.evidence?.urls?.portrait||[];const landscape=coverState.gates.cover.evidence?.urls?.landscape||[];if(portrait.length&&landscape.length&&portrait.some(url=>!landscape.includes(url))&&landscape.some(url=>!portrait.includes(url)))break;await wait(1)}for(const asset of douyinCoverAssets){const urls=coverState.gates.cover.evidence?.urls?.[asset.slot]||[];const otherSlot=asset.slot==='portrait'?'landscape':'portrait';const otherUrls=coverState.gates.cover.evidence?.urls?.[otherSlot]||[];const afterUrl=urls.find(url=>!(beforeUrls[asset.slot]||[]).includes(url)&&!otherUrls.includes(url))||urls.find(url=>!otherUrls.includes(url));if(!afterUrl)return {...coverState,blocker:typedBlocker('PLATFORM_REJECTED_ASSET',`douyin ${asset.slot} cover did not produce a distinct preview`,{retryable:true,evidence:{before:beforeUrls[asset.slot]||[],after:urls,other:otherUrls}})};receipts.cover.slots[asset.slot]={assetPath:asset.path,ratio:asset.ratio,beforeUrls:beforeUrls[asset.slot]||[],afterUrl};}expectedReceipts.cover=receipts.cover;}}
-  const after=await inspectDouyin();return {...after,actions,receipts};
+  const before = await inspectDouyin();
+  if (!before.gates.video.ok) return { ...before, blocker: typedBlocker('STATE_AMBIGUOUS', '抖音没有可修复的已上传视频') };
+  const actions = {};
+  if (!before.gates.title.ok) {
+    actions.title = await setDouyinTitle();
+    if (!actions.title.ok) return { ...(await inspectDouyin()), blocker: typedBlocker('ACTION_FAILED', actions.title.reason, { evidence: actions.title }) };
+  }
+  if (!(before.gates.description.ok && before.gates.tags.ok)) {
+    actions.body = await clearAndFillDouyinBody();
+    if (!actions.body.ok) return { ...(await inspectDouyin()), blocker: typedBlocker('ACTION_FAILED', actions.body.reason) };
+    for (const tag of douyinTopics) {
+      const added = await addDouyinTopic(tag);
+      (actions.topics ||= []).push({ tag, ...added });
+      if (!added.ok) return { ...(await inspectDouyin()), blocker: typedBlocker('ACTION_FAILED', added.reason, { evidence: added }) };
+    }
+  }
+  actions.settings = await turnOffDouyinSync();
+  if (!actions.settings.ok) return { ...(await inspectDouyin()), blocker: typedBlocker('SELECTOR_DRIFT', actions.settings.reason) };
+
+  const receipts = {};
+  if (douyinCustomCover) {
+    const repaired = await repairDelayedDouyinCoverReceipt();
+    if (repaired.ok) {
+      actions.coverReceiptRepair = { ok: true, reason: repaired.reason };
+      receipts.cover = repaired.receipt;
+      expectedReceipts.cover = receipts.cover;
+    } else {
+      const beforeUrls = before.gates.cover.evidence?.urls || {};
+      const existingDistinct = (beforeUrls.portrait || []).some(url => url && (beforeUrls.landscape || []).some(other => other && other !== url));
+      if (existingDistinct && !expectedReceipts.cover) {
+        return {
+          ...before,
+          blocker: typedBlocker('STATE_AMBIGUOUS', '抖音页面已有双封面，但正式回执和崩溃恢复 checkpoint 均缺失，无法证明素材身份；拒绝盲目重传', { retryable: false, evidence: { urls: beforeUrls } }),
+        };
+      }
+      receipts.cover = { slots: {} };
+      for (const asset of douyinCoverAssets) {
+        const uploaded = await uploadDouyinCoverSlot(asset);
+        (actions.covers ||= []).push({ asset, ...uploaded });
+        if (!uploaded.ok) return { ...(await inspectDouyin()), blocker: typedBlocker('PLATFORM_REJECTED_ASSET', uploaded.reason, { retryable: true, evidence: uploaded }) };
+      }
+      let coverState = null;
+      for (let attempt = 0; attempt < 45; attempt += 1) {
+        coverState = await inspectDouyin();
+        const portrait = coverState.gates.cover.evidence?.urls?.portrait || [];
+        const landscape = coverState.gates.cover.evidence?.urls?.landscape || [];
+        if (portrait.length && landscape.length && portrait.some(url => !landscape.includes(url)) && landscape.some(url => !portrait.includes(url))) break;
+        await wait(1);
+      }
+      for (const asset of douyinCoverAssets) {
+        const urls = coverState.gates.cover.evidence?.urls?.[asset.slot] || [];
+        const otherSlot = asset.slot === 'portrait' ? 'landscape' : 'portrait';
+        const otherUrls = coverState.gates.cover.evidence?.urls?.[otherSlot] || [];
+        const afterUrl = urls.find(url => !(beforeUrls[asset.slot] || []).includes(url) && !otherUrls.includes(url)) || urls.find(url => !otherUrls.includes(url));
+        if (!afterUrl) return { ...coverState, blocker: typedBlocker('PLATFORM_REJECTED_ASSET', `douyin ${asset.slot} cover did not produce a distinct preview`, { retryable: true, evidence: { before: beforeUrls[asset.slot] || [], after: urls, other: otherUrls } }) };
+        receipts.cover.slots[asset.slot] = { assetPath: asset.path, ratio: asset.ratio, beforeUrls: beforeUrls[asset.slot] || [], afterUrl };
+      }
+      expectedReceipts.cover = receipts.cover;
+    }
+  }
+  actions.receiptCheckpoint = checkpointReceipts(receipts);
+  const after = await inspectDouyin();
+  return { ...after, actions, receipts };
 }
 
 async function runPlatformPhase(){if(phase==='inspect'||phase==='verify')return await inspectDouyin();if(phase==='upload')return await uploadDouyin();if(phase==='mutate')return await mutateDouyin();return {...(await inspectDouyin()),blocker:typedBlocker('ACTION_FAILED',`unsupported Douyin phase: ${phase}`)}}

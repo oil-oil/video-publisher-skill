@@ -12,6 +12,7 @@ import {
 } from "../lib/content-package.mjs";
 import { loadConfig } from "../lib/config.mjs";
 import { PLATFORMS } from "./lib/model.mjs";
+import { acquirePlatformLock } from "./lib/platform-lock.mjs";
 import { parseV2Result, V2_RESULT_PREFIX } from "./lib/result-line.mjs";
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -29,7 +30,7 @@ const platformFiles = {
 };
 
 function usage() {
-  return "Usage: run-platform.mjs <platform> <package.json> <inspect|upload|mutate|verify|quarantine> [task-suffix] [task-space-id]";
+  return "Usage: run-platform.mjs <platform> <package.json> <inspect|upload|mutate|verify|quarantine> [task-suffix] [task-space-id] [--confirm-original-rights]";
 }
 
 function runEgo(script) {
@@ -45,13 +46,24 @@ function runEgo(script) {
   });
 }
 
-const [platform, rawPackagePath, phase, taskSuffix = "manual", taskSpaceRef = ""] = process.argv.slice(2);
+const rawArgs = process.argv.slice(2);
+const originalRightsConfirmed = rawArgs.includes("--confirm-original-rights");
+const positional = rawArgs.filter(arg => arg !== "--confirm-original-rights");
+if (positional.some(arg => arg.startsWith("--"))) {
+  console.error(usage());
+  process.exit(2);
+}
+const [platform, rawPackagePath, phase, taskSuffix = "manual", taskSpaceRef = ""] = positional;
 if (!PLATFORMS.includes(platform) || !rawPackagePath || !["inspect", "upload", "mutate", "verify", "quarantine"].includes(phase)) {
   console.error(usage());
   process.exit(2);
 }
 if (phase === "quarantine" && platform !== "bilibili") {
   console.error("quarantine is supported only for bilibili");
+  process.exit(2);
+}
+if (phase === "mutate" && ["xiaohongshu", "bilibili", "wechat_channels"].includes(platform) && !originalRightsConfirmed) {
+  console.error(`Current-run originality confirmation is required before ${platform} mutation; add --confirm-original-rights only after the user confirms.`);
   process.exit(2);
 }
 
@@ -65,6 +77,7 @@ if (!fs.existsSync(pkg.videoPath)) throw new Error(`Video file not found: ${pkg.
 
 const header = [
   'import fs from "node:fs";',
+  'import path from "node:path";',
   `const platform = ${JSON.stringify(platform)};`,
   `const phase = ${JSON.stringify(phase)};`,
   `const taskName = ${JSON.stringify(`video publisher v2 ${platform} ${taskSuffix}`)};`,
@@ -73,6 +86,8 @@ const header = [
   `const pkg = ${JSON.stringify(pkg)};`,
   `const videoPath = ${JSON.stringify(path.resolve(pkg.videoPath))};`,
   `const expectedReceipts = ${JSON.stringify(JSON.parse(process.env.VIDEO_PUBLISHER_V2_RECEIPTS || "{}"))};`,
+  `const receiptCheckpointPath = ${JSON.stringify(process.env.VIDEO_PUBLISHER_V2_CHECKPOINT_PATH || "")};`,
+  `const jobFingerprint = ${JSON.stringify(process.env.VIDEO_PUBLISHER_V2_FINGERPRINT || "")};`,
 ].join("\n");
 const fragments = [
   header,
@@ -81,7 +96,13 @@ const fragments = [
   fs.readFileSync(path.join(DIR, "platforms", "dispatch.mjs"), "utf8"),
 ].join("\n\n");
 
-const execution = await runEgo(fragments);
+const releasePlatformLock = acquirePlatformLock(platform, phase);
+let execution;
+try {
+  execution = await runEgo(fragments);
+} finally {
+  releasePlatformLock();
+}
 const combined = `${execution.stdout}\n${execution.stderr}`;
 let result;
 try {

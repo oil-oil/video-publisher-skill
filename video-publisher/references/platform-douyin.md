@@ -43,6 +43,8 @@ The main portrait and landscape cards must expose two distinct accepted URLs. A 
 
 The landscape card may update after the completion control closes. Wait until both cards are non-empty and distinct before building receipts. A known older receipt may be repaired only when it proves both real slot uploads, the portrait receipt still matches the live portrait card, both asset paths/ratios are exact, and the delayed live landscape card is distinct; otherwise re-upload or block.
 
+Persist the completed two-slot receipt through the shared atomic checkpoint before returning the mutation result. If both live slots are already distinct but no matching receipt/checkpoint exists, block instead of treating URL distinctness as proof of local-asset identity.
+
 ## Required Gates
 
 ```text

@@ -77,3 +77,5 @@ A later 534 MB run deleted the ready Douyin task space. The same job created a r
 A 1.12 GB default-cover regression then isolated the 15-minute duration boundary: 15:09 failed explicitly twice, while the 14:59 near-equivalent source reached `READY` and stayed no-op `READY` for three reruns. The production preflight now blocks the known-invalid source before any browser work.
 
 An exact 15:00 stream copy reported 900.010 seconds in ISO BMFF metadata, uploaded on the first diagnostic attempt, and passed exact metadata, five topics, settings, default-cover, final-button, and safety verification. After the 0.1-second tolerance was added, the production orchestrator repeated the upload in a fresh task space, reached `READY`, and passed three no-op reruns. The tolerance exists only for this verified container-rounding behavior.
+
+A later forced process termination left the exact title/body and two of five committed topic entities on the live page. The next production run identified only `tags` as missing, performed no video upload, rebuilt the rich editor without residue or duplicates, and independently verified all five topics.

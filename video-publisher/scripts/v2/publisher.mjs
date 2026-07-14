@@ -14,6 +14,7 @@ import {
 import { loadConfig } from "../lib/config.mjs";
 import { inspectMediaFile, validateMediaForPlatform } from "../lib/media.mjs";
 import { buildIdentity } from "./lib/identity.mjs";
+import { acquireJobLock } from "./lib/job-lock.mjs";
 import { JobStore } from "./lib/job-store.mjs";
 import { BLOCKER, PLATFORMS, classifyVerdict, compactVerdict, evaluateObservation } from "./lib/model.mjs";
 import { parseV2Result } from "./lib/result-line.mjs";
@@ -25,6 +26,7 @@ const RIGHTS_PLATFORMS = new Set(["xiaohongshu", "bilibili", "wechat_channels"])
 const validators = { xiaohongshu: validateXiaohongshuPackage, douyin: validateDouyinPackage, bilibili: validateBilibiliPackage, wechat_channels: validateWechatChannelsPackage };
 
 class UsageError extends Error {}
+let releaseActiveJobLock = null;
 
 function positive(raw, name) {
   const value = Number(raw);
@@ -123,6 +125,7 @@ async function main() {
   const identity = await buildIdentity(pkg);
   const jobId = args.jobId || identity.fingerprint.slice(0, 16);
   const jobDir = path.join(args.stateRoot, jobId);
+  releaseActiveJobLock = acquireJobLock(jobDir, { jobId, packagePath: args.packagePath });
   const store = new JobStore(jobDir, initialState(jobId, identity, args));
   const state = await store.initialize();
   if (store.lastRecovery) {
@@ -258,7 +261,9 @@ function summary(state, platforms, statePath) {
   };
 }
 
-main().catch(error => {
-  console.error(`[video-publisher-v2] fatal: ${String(error?.stack || error)}`);
-  process.exitCode = error instanceof UsageError ? 2 : 1;
-});
+main()
+  .catch(error => {
+    console.error(`[video-publisher-v2] fatal: ${String(error?.stack || error)}`);
+    process.exitCode = error instanceof UsageError ? 2 : 1;
+  })
+  .finally(() => releaseActiveJobLock?.());

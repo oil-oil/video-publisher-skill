@@ -9,6 +9,7 @@ import {
   validateWechatChannelsPackage,
   validateXiaohongshuPackage,
 } from "./lib/content-package.mjs";
+import { inspectMediaFile, validateMediaForPlatform } from "./lib/media.mjs";
 
 const validators = {
   xiaohongshu: validateXiaohongshuPackage,
@@ -26,13 +27,18 @@ if (!validators[platform] || !packagePath) {
 
 loadConfig({ requireOnboarded: true });
 const pkg = readPackage(packagePath);
-const errors = validators[platform](pkg);
+const media = inspectMediaFile(pkg.videoPath);
+const errors = [
+  ...validators[platform](pkg),
+  ...validateMediaForPlatform(pkg, platform, media),
+];
 const coverAssets = coverAssetsForPlatform(pkg, platform);
 
 const result = {
   platform,
   ok: errors.length === 0,
   title: pkg.title,
+  media,
   douyinTopics: platform === "douyin" ? pkg.douyinTopics : undefined,
   cover: {
     uploadCustomCover: coverUploadEnabled(pkg.cover || {}),

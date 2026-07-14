@@ -30,7 +30,7 @@ bilibili
 wechat_channels
 ```
 
-Validation checks title limits, required platform fields, package-supplied Douyin topics, and any requested cover paths and ratios.
+Validation checks the local video path, title limits, required platform fields, package-supplied Douyin topics, and any requested cover paths and ratios. For MP4/M4V/MOV it reports duration from ISO BMFF metadata without `ffprobe`; a Douyin source above the real-tested 900-second boundary fails with `DOUYIN_DURATION_LIMIT` before browser work. In a mixed-platform production run, the orchestrator records the invalid platform as `PLATFORM_REJECTED_ASSET` and continues every other platform that passed preflight.
 
 ## Production Orchestrator
 

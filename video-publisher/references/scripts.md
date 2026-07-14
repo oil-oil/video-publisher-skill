@@ -38,11 +38,10 @@ Validation checks title limits, required platform fields, package-supplied Douyi
 scripts/run-safe-platforms.sh \
   /absolute/path/to/package.json \
   task-suffix \
-  xiaohongshu douyin bilibili wechat_channels \
-  --confirm-original-rights
+  xiaohongshu douyin bilibili wechat_channels
 ```
 
-Add `--confirm-original-rights` only after the user confirms in the current run that the video may truthfully receive the selected original/self-made declarations. The flag is required before any mutating production run that includes Xiaohongshu, Bilibili, or WeChat Channels. It is deliberately not written to configuration, package, or job state, so every resumed run needs fresh current-run authority. Read-only `--inspect-only` never needs it.
+When onboarding has `declarations.originalityPolicy: all_videos_original`, the runner applies truthful original/self-made declarations without another flag. With the generic `ask_each_run` policy, add `--confirm-original-rights` only after the user confirms the current video; this one-run override is not persisted. Read-only `--inspect-only` never needs either signal.
 
 The platform list is optional; omit it to select all four. If the second positional argument is a platform key, the task suffix defaults to `manual`.
 
@@ -95,7 +94,7 @@ node scripts/v2/run-platform.mjs \
   [numeric-task-space-id]
 ```
 
-Direct `mutate` diagnosis for Xiaohongshu, Bilibili, or WeChat Channels also requires the one-run `--confirm-original-rights` flag. `inspect`, `upload`, `verify`, and Bilibili `quarantine` remain available without it.
+Direct `mutate` diagnosis for Xiaohongshu, Bilibili, or WeChat Channels requires either onboarded `all_videos_original` or the one-run `--confirm-original-rights` override. `inspect`, `upload`, `verify`, and Bilibili `quarantine` remain available without either signal.
 
 `quarantine` is valid only for Bilibili. Always reuse the numeric task-space id recorded in job state; do not invent a second task space for an active draft.
 

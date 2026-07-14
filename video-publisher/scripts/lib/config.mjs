@@ -4,6 +4,7 @@ import path from "node:path";
 
 export const CONFIG_SCHEMA_VERSION = 1;
 export const CONFIG_PLATFORMS = ["xiaohongshu", "douyin", "bilibili", "wechat_channels"];
+export const ORIGINALITY_POLICIES = ["ask_each_run", "all_videos_original"];
 
 function cleanList(values = []) {
   const seen = new Set();
@@ -40,6 +41,9 @@ export function defaultConfig() {
       copyStyle: "clear, conversational, specific, non-hype",
       recurringTags: [],
     },
+    declarations: {
+      originalityPolicy: "ask_each_run",
+    },
     platforms: {
       douyin: { defaultTopics: [] },
       bilibili: { allowedAutoTags: [] },
@@ -72,6 +76,9 @@ export function normalizeConfig(raw = {}) {
       copyStyle: String(raw.contentProfile?.copyStyle || fallback.contentProfile.copyStyle).trim(),
       recurringTags: cleanList(raw.contentProfile?.recurringTags || []),
     },
+    declarations: {
+      originalityPolicy: String(raw.declarations?.originalityPolicy || fallback.declarations.originalityPolicy).trim(),
+    },
     platforms: {
       douyin: {
         defaultTopics: cleanList(raw.platforms?.douyin?.defaultTopics || []),
@@ -102,6 +109,9 @@ export function validateConfig(config) {
   if (unsupported.length) errors.push(`unsupported defaultPlatforms: ${unsupported.join(", ")}`);
   if (config.platforms.douyin.defaultTopics.length > 5) {
     errors.push("platforms.douyin.defaultTopics supports at most 5 topics");
+  }
+  if (!ORIGINALITY_POLICIES.includes(config.declarations.originalityPolicy)) {
+    errors.push(`declarations.originalityPolicy must be one of: ${ORIGINALITY_POLICIES.join(", ")}`);
   }
   for (const key of ["checkConcurrency", "uploadConcurrency"]) {
     const value = config.execution[key];
@@ -164,6 +174,7 @@ export function createOnboardedConfig(input = {}) {
     sourceDirectory: input.sourceDirectory,
     defaultPlatforms: input.defaultPlatforms,
     contentProfile: input.contentProfile,
+    declarations: input.declarations,
     platforms: input.platforms,
     execution: input.execution,
     cover: input.cover,

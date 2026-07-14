@@ -62,12 +62,12 @@ if (phase === "quarantine" && platform !== "bilibili") {
   console.error("quarantine is supported only for bilibili");
   process.exit(2);
 }
-if (phase === "mutate" && ["xiaohongshu", "bilibili", "wechat_channels"].includes(platform) && !originalRightsConfirmed) {
-  console.error(`Current-run originality confirmation is required before ${platform} mutation; add --confirm-original-rights only after the user confirms.`);
+const config = loadConfig({ requireOnboarded: true });
+const standingOriginalityPolicy = config.declarations.originalityPolicy === "all_videos_original";
+if (phase === "mutate" && ["xiaohongshu", "bilibili", "wechat_channels"].includes(platform) && !standingOriginalityPolicy && !originalRightsConfirmed) {
+  console.error(`Originality confirmation is required before ${platform} mutation; set declarations.originalityPolicy=all_videos_original during onboarding, or add --confirm-original-rights after confirming this run.`);
   process.exit(2);
 }
-
-loadConfig({ requireOnboarded: true });
 const packagePath = path.resolve(rawPackagePath);
 if (!fs.existsSync(packagePath)) throw new Error(`Package JSON not found: ${packagePath}`);
 const pkg = readPackage(packagePath);

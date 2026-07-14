@@ -212,29 +212,35 @@ async function ensureXhsOriginal() {
 
 async function uploadXhsCover() {
   if (!xhsCustomCover) return { ok: true, skipped: true };
-  await removeExactStaleMask(/设置封面/);
   const before = await js(String.raw`(() => { const el=document.querySelector('.cover-plugin-preview .default.row, .cover-plugin-preview .default.column'); return el ? getComputedStyle(el).backgroundImage : '' })()`);
-  const opened = await js(String.raw`(() => {
-    const target = document.querySelector('.cover-plugin-preview .default.row, .cover-plugin-preview .default.column')
-    if (!target) return { ok: false, reason: 'xiaohongshu cover preview missing' }
-    target.click()
-    return { ok: true }
-  })()`);
-  if (!opened.ok) return opened;
-  await wait(2);
-  let tab = await js(String.raw`(() => {
-    const item=[...document.querySelectorAll('.d-tabs-header')].find(el=>String(el.innerText||el.textContent||'').replace(/\s+/g,' ').trim()==='上传封面')
-    if(!item)return {ok:false,reason:'xiaohongshu upload-cover tab missing'}
-    item.click(); return {ok:true}
-  })()`);
-  if (!tab.ok) {
-    await click('.cover-plugin-preview .default.row, .cover-plugin-preview .default.column', { label: 'open xhs cover editor' }).catch(() => null);
-    await wait(2);
-    tab = await js(String.raw`(() => {
-      const item=[...document.querySelectorAll('.d-tabs-header')].find(el=>String(el.innerText||el.textContent||'').replace(/\s+/g,' ').trim()==='上传封面')
-      if(!item)return {ok:false,reason:'xiaohongshu upload-cover tab missing after real click'}
-      item.click(); return {ok:true}
-    })()`);
+  let tab = { ok: false, reason: 'xiaohongshu upload-cover tab did not become visible' };
+  for (let attempt = 0; attempt < 2 && !tab.ok; attempt += 1) {
+    await removeExactStaleMask(/设置封面/);
+    try {
+      await click('.cover-plugin-preview .default.row, .cover-plugin-preview .default.column', { label: 'open xhs cover editor' });
+    } catch (error) {
+      tab = { ok: false, reason: `xiaohongshu cover preview click failed: ${String(error?.message || error)}` };
+      continue;
+    }
+    for (let index = 0; index < 20; index += 1) {
+      const exposed = await js(String.raw`(() => {
+        const compact=value=>String(value||'').replace(/\s+/g,' ').trim()
+        const item=[...document.querySelectorAll('.d-tabs-header')]
+          .find(el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return compact(el.innerText||el.textContent||'')==='上传封面'&&r.width>10&&r.height>10&&s.display!=='none'&&s.visibility!=='hidden'})
+        if(!item)return {ok:false}
+        item.id='vp2-xhs-upload-cover-tab';item.scrollIntoView({block:'center',inline:'center'});return {ok:true,selector:'#vp2-xhs-upload-cover-tab'}
+      })()`);
+      if (exposed.ok) {
+        try {
+          await click(exposed.selector, { label: 'activate xhs upload-cover tab' });
+          tab = { ok: true, attempt: attempt + 1, waited: index * 0.5 };
+        } catch (error) {
+          tab = { ok: false, reason: `xiaohongshu upload-cover tab click failed: ${String(error?.message || error)}` };
+        }
+        break;
+      }
+      await wait(0.5);
+    }
   }
   if (!tab.ok) return tab;
   await wait(1);

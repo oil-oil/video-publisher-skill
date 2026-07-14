@@ -22,6 +22,8 @@ Do not route around ownership by opening a new task space.
 
 If a persisted numeric id is explicitly reported as `task space not found` after a browser crash or interrupted desktop run, the maintained runner may recreate the same named platform task space and persist its new id. Do not use this fallback for user-control, inactive, or ownership errors.
 
+This fallback has passed real task-space-loss tests on all four platforms. A replacement space must start from fresh page truth, rebuild only that platform, generate new cover receipts when the old page no longer exists, persist the replacement numeric id, and leave every unaffected platform untouched.
+
 ## Platform URLs
 
 ```text

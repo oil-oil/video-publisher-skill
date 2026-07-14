@@ -46,6 +46,8 @@ Require cover cards and the absence of all progress signals, including percentag
 
 A 533 MB fault test terminated the orchestrator during the Wujie upload. The same task space resumed with action mode `resume_existing`, reactivated the page lifecycle while waiting, completed without reinjection, and later reached `READY` with both cover slots verified.
 
+A later 534 MB run deleted the ready WeChat Channels task space. The same job created a replacement numeric space, re-uploaded and rebuilt only WeChat Channels, generated fresh vertical and horizontal cover receipts, preserved the other three ready drafts, and passed repeated no-op verification.
+
 ## Draft Identity
 
 The page does not expose a reliable filename. Reuse an uploaded draft only when the description is empty or matches the expected package. A different non-empty description is foreign and must block.

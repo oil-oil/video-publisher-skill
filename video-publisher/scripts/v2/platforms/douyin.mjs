@@ -103,12 +103,39 @@ async function uploadDouyin() {
     if(!point)return {...before,blocker:typedBlocker('SELECTOR_DRIFT','douyin discard button missing')};
     await click([point.x,point.y],{label:'discard stale douyin upload'}).catch(()=>{});await wait(1.5);
   }
-  const exposed=await js(String.raw`(() => { const input=[...document.querySelectorAll('input[type=file]')].find(el=>/video|\.mp4|\.mov|\.mkv|\.flv/i.test(el.accept||'')); if(!input)return {ok:false,reason:'douyin video input missing'}; input.id='vp2-douyin-video'; return {ok:true,selector:'#vp2-douyin-video'} })()`);
-  if(!exposed.ok)return {...before,blocker:typedBlocker('SELECTOR_DRIFT',exposed.reason)};
-  try{await uploadFile(exposed.selector,videoPath);}catch(error){return {...before,blocker:typedBlocker('UPLOAD_NOT_STARTED',String(error?.message||error),{retryable:true})};}
-  let stableSince=0;
-  for(let i=0;i<180;i+=1){const current=await inspectDouyin();if(current.gates.video.ok){if(!stableSince)stableSince=Date.now();if(Date.now()-stableSince>=10000)return current;}else stableSince=0;await wait(5);}
-  const after=await inspectDouyin();return {...after,blocker:typedBlocker('UPLOAD_STALLED','抖音视频没有在等待窗口内稳定完成',{retryable:true,evidence:after.gates.video.evidence})};
+  const attempts=[];
+  for(let attempt=1;attempt<=2;attempt+=1){
+    const exposed=await js(String.raw`(() => { const input=[...document.querySelectorAll('input[type=file]')].find(el=>/video|\.mp4|\.mov|\.mkv|\.flv/i.test(el.accept||'')); if(!input)return {ok:false,reason:'douyin video input missing'}; input.value=''; input.id='vp2-douyin-video'; return {ok:true,selector:'#vp2-douyin-video'} })()`);
+    if(!exposed.ok)return {...before,blocker:typedBlocker('SELECTOR_DRIFT',exposed.reason)};
+    try{await uploadFile(exposed.selector,videoPath);}catch(error){return {...before,blocker:typedBlocker('UPLOAD_NOT_STARTED',String(error?.message||error),{retryable:true,evidence:{attempt}})};}
+    let stableSince=0;
+    let activityObserved=false;
+    let current=before;
+    for(let i=0;i<180;i+=1){
+      await wait(5);
+      current=await inspectDouyin();
+      const video=current.gates.video.evidence||{};
+      if(video.uploading||video.failed!==true)activityObserved=true;
+      if(current.gates.video.ok){
+        if(!stableSince)stableSince=Date.now();
+        if(Date.now()-stableSince>=10000)return {...current,actions:{uploadAttempts:attempts.concat({attempt,result:'ready'})}};
+      }else stableSince=0;
+      if(video.failed===true&&!video.uploading&&(activityObserved||i>=5)){
+        attempts.push({attempt,result:'explicit_failure',evidence:video});
+        break;
+      }
+    }
+    const after=await inspectDouyin();
+    if(after.gates.video.ok)return {...after,actions:{uploadAttempts:attempts.concat({attempt,result:'ready'})}};
+    const video=after.gates.video.evidence||{};
+    if(video.failed===true&&attempt<2){await wait(2);before=after;continue;}
+    const blocker=video.failed===true
+      ? typedBlocker('PLATFORM_REJECTED_ASSET','抖音明确显示视频上传失败，已完成一次有界重试',{retryable:true,evidence:{attempts,video}})
+      : typedBlocker('UPLOAD_STALLED','抖音视频没有在等待窗口内稳定完成',{retryable:true,evidence:{attempts,video}});
+    return {...after,actions:{uploadAttempts:attempts},blocker};
+  }
+  const after=await inspectDouyin();
+  return {...after,blocker:typedBlocker('UPLOAD_STALLED','抖音视频重试后仍未稳定完成',{retryable:true,evidence:after.gates.video.evidence})};
 }
 
 async function setDouyinTitle() {
@@ -121,31 +148,48 @@ async function setDouyinTitle() {
   return after===douyinTitle?{ok:true,before,value:after}:{ok:false,reason:'douyin title input did not persist exact value',expected:douyinTitle,actual:after};
 }
 
-async function clearAndFillDouyinBody() {
-  const locate=()=>js(String.raw`(() => {
+async function locateDouyinEditor() {
+  return await js(String.raw`(() => {
     const compact=v=>String(v||'').replace(/\s+/g,' ').trim();const visible=el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>180&&r.height>50&&s.display!=='none'&&s.visibility!=='hidden'}
     const rows=[...document.querySelectorAll('[contenteditable="true"],[contenteditable=""]')].map(el=>{const r=el.getBoundingClientRect();let p=el.parentElement,context='';for(let i=0;p&&i<5;i+=1){context+=' '+compact(p.innerText||p.textContent||'');p=p.parentElement}return {el,r,context,cls:String(el.className||'')}}).filter(item=>visible(item.el)&&!item.el.closest('[role="dialog"],[class*="modal"],[class*="dialog"]')).sort((a,b)=>Number(/作品描述|#添加话题|@好友/.test(b.context))-Number(/作品描述|#添加话题|@好友/.test(a.context))||Number(/editor|zone|ace/.test(b.cls))-Number(/editor|zone|ace/.test(a.cls))||b.r.width*b.r.height-a.r.width*a.r.height)
-    const item=rows[0];if(!item)return {ok:false,reason:'douyin description editor missing'};item.el.scrollIntoView({block:'center',inline:'center'});return {ok:true,text:item.el.innerText||item.el.textContent||'',className:item.cls}
+    const item=rows[0];if(!item)return {ok:false,reason:'douyin description editor missing'};item.el.id='vp2-douyin-editor';item.el.scrollIntoView({block:'center',inline:'center'});return {ok:true,selector:'#vp2-douyin-editor',text:item.el.innerText||item.el.textContent||'',className:item.cls,point:{x:item.r.left+Math.min(24,item.r.width/4),y:item.r.top+Math.min(24,item.r.height/3)}}
   })()`);
-  const focus=(collapseEnd)=>js(String.raw`((collapseEnd) => {
-    const compact=v=>String(v||'').replace(/\s+/g,' ').trim();const visible=el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>180&&r.height>50&&s.display!=='none'&&s.visibility!=='hidden'}
-    const rows=[...document.querySelectorAll('[contenteditable="true"],[contenteditable=""]')].map(el=>{const r=el.getBoundingClientRect();let p=el.parentElement,context='';for(let i=0;p&&i<5;i+=1){context+=' '+compact(p.innerText||p.textContent||'');p=p.parentElement}return {el,r,context,cls:String(el.className||'')}}).filter(item=>visible(item.el)&&!item.el.closest('[role="dialog"],[class*="modal"],[class*="dialog"]')).sort((a,b)=>Number(/作品描述|#添加话题|@好友/.test(b.context))-Number(/作品描述|#添加话题|@好友/.test(a.context))||Number(/editor|zone|ace/.test(b.cls))-Number(/editor|zone|ace/.test(a.cls))||b.r.width*b.r.height-a.r.width*a.r.height)
-    const el=rows[0]?.el;if(!el)return {ok:false,reason:'douyin description editor missing'};el.focus();const selection=getSelection(),range=document.createRange();range.selectNodeContents(el);if(collapseEnd)range.collapse(false);selection.removeAllRanges();selection.addRange(range);return {ok:document.activeElement===el,selected:String(selection),text:el.innerText||el.textContent||''}
-  })(${JSON.stringify(collapseEnd)})`);
-  let located=await locate();if(!located.ok)return located;
+}
+
+async function focusDouyinEditorEnd() {
+  const located=await locateDouyinEditor();
+  if(!located.ok)return located;
+  const endpoint=await js(String.raw`(() => {
+    const editor=document.querySelector('#vp2-douyin-editor');if(!editor)return {ok:false,reason:'douyin editor lost'}
+    const walker=document.createTreeWalker(editor,NodeFilter.SHOW_TEXT);let node,last=null;while((node=walker.nextNode())){if(String(node.nodeValue||'').length)last=node}
+    const er=editor.getBoundingClientRect();if(!last)return {ok:true,point:{x:er.left+12,y:er.top+20}}
+    const range=document.createRange();range.setStart(last,Math.max(0,last.nodeValue.length-1));range.setEnd(last,last.nodeValue.length);const rect=range.getBoundingClientRect();
+    return {ok:true,point:{x:Math.min(er.right-6,Math.max(er.left+6,rect.right+2)),y:Math.min(er.bottom-6,Math.max(er.top+6,rect.top+rect.height/2))}}
+  })()`);
+  if(!endpoint.ok)return endpoint;
+  try{await click([endpoint.point.x,endpoint.point.y],{label:'focus douyin body end'})}catch(error){return {ok:false,reason:String(error?.message||error)}}
+  await wait(.2);
+  return {ok:true,point:endpoint.point};
+}
+
+async function clearAndFillDouyinBody() {
+  let located=await locateDouyinEditor();if(!located.ok)return located;
   for(let attempt=0;attempt<3;attempt+=1){
-    const selected=await focus(false);if(!selected.ok)continue;await wait(.2);await pressKey('Backspace').catch(()=>{});await wait(.7);
-    if(!String((await locate()).text||'').replace(/[\s\u200b]/g,''))break;
+    try{await click([located.point.x,located.point.y],{label:'focus douyin body'})}catch(error){return {ok:false,reason:String(error?.message||error)}}
+    await cdp('Input.dispatchKeyEvent',{type:'keyDown',modifiers:4,key:'a',code:'KeyA',windowsVirtualKeyCode:65});
+    await cdp('Input.dispatchKeyEvent',{type:'keyUp',modifiers:4,key:'a',code:'KeyA',windowsVirtualKeyCode:65});
+    await pressKey('Backspace').catch(()=>{});await wait(.7);
+    located=await locateDouyinEditor();if(!String(located.text||'').replace(/[\s\u200b]/g,''))break;
   }
-  const cleared=await locate();if(String(cleared.text||'').replace(/[\s\u200b]/g,''))return {ok:false,reason:'douyin description editor did not clear',text:cleared.text};
-  if(douyinDescription){const focused=await focus(true);if(!focused.ok)return focused;await cdp('Input.insertText',{text:douyinDescription});await wait(1);}
-  const after=await locate();const ok=String(after.text||'').replace(/[\s\u200b]/g,'')===String(douyinDescription||'').replace(/[\s\u200b]/g,'');return ok?{ok:true,text:after.text}:{ok:false,reason:'douyin description did not persist exact value',expected:douyinDescription,actual:after.text};
+  const cleared=await locateDouyinEditor();if(String(cleared.text||'').replace(/[\s\u200b]/g,''))return {ok:false,reason:'douyin description editor did not clear',text:cleared.text};
+  if(douyinDescription){const focused=await focusDouyinEditorEnd();if(!focused.ok)return focused;await cdp('Input.insertText',{text:douyinDescription});await wait(1);}
+  const after=await locateDouyinEditor();const ok=String(after.text||'').replace(/[\s\u200b]/g,'')===String(douyinDescription||'').replace(/[\s\u200b]/g,'');return ok?{ok:true,text:after.text}:{ok:false,reason:'douyin description did not persist exact value',expected:douyinDescription,actual:after.text};
 }
 
 async function addDouyinTopic(tag) {
-  const focused=await js(String.raw`(() => {const c=v=>String(v||'').replace(/\s+/g,' ').trim();const visible=el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>180&&r.height>50&&s.display!=='none'&&s.visibility!=='hidden'};const editor=[...document.querySelectorAll('[contenteditable="true"],[contenteditable=""]')].map(el=>{const r=el.getBoundingClientRect();let p=el.parentElement,context='';for(let i=0;p&&i<5;i+=1){context+=' '+c(p.innerText||p.textContent||'');p=p.parentElement}return {el,r,context,cls:String(el.className||'')}}).filter(item=>visible(item.el)&&!item.el.closest('[role="dialog"],[class*="modal"],[class*="dialog"]')).sort((a,b)=>Number(/作品描述|#添加话题|@好友/.test(b.context))-Number(/作品描述|#添加话题|@好友/.test(a.context))||Number(/editor|zone|ace/.test(b.cls))-Number(/editor|zone|ace/.test(a.cls))||b.r.width*b.r.height-a.r.width*a.r.height)[0];if(!editor)return {ok:false,reason:'douyin description editor missing'};editor.el.scrollIntoView({block:'center',inline:'center'});editor.el.focus();const selection=window.getSelection(),range=document.createRange();range.selectNodeContents(editor.el);range.collapse(false);selection.removeAllRanges();selection.addRange(range);const r=editor.el.getBoundingClientRect();return {ok:true,point:{x:r.right-18,y:r.top+20}}})()`);
-  if(!focused.ok)return focused;await click([focused.point.x,focused.point.y],{label:'focus douyin body end'}).catch(()=>{});await wait(.2);
-  await js(String.raw`(() => {const editor=[...document.querySelectorAll('[contenteditable="true"],[contenteditable=""]')].find(el=>/zone-container|editor-kit/.test(String(el.className||'')));if(!editor)return false;editor.focus();const selection=window.getSelection(),range=document.createRange();range.selectNodeContents(editor);range.collapse(false);selection.removeAllRanges();selection.addRange(range);return true})()`);
+  const focused=await focusDouyinEditorEnd();
+  if(!focused.ok)return focused;
+  await cdp('Input.insertText',{text:' '});await wait(.2);
   const buttonPoint=await js(String.raw`(() => {const c=v=>String(v||'').replace(/\s+/g,' ').trim();const item=[...document.querySelectorAll('button,[role="button"],div,span')].map(el=>({el,text:c(el.innerText||el.textContent||''),r:el.getBoundingClientRect()})).filter(x=>x.text==='#添加话题'&&x.r.width>20&&x.r.width<140&&x.r.height>=8&&x.r.height<50).sort((a,b)=>a.r.width*a.r.height-b.r.width*b.r.height)[0];if(!item)return null;item.el.scrollIntoView({block:'center',inline:'center'});const r=item.el.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`);
   if(!buttonPoint)return {ok:false,reason:'douyin add-topic button missing'};await click([buttonPoint.x,buttonPoint.y],{label:`open douyin topic ${tag}`}).catch(()=>{});await wait(.7);await cdp('Input.insertText',{text:String(tag).trim()});await wait(2.4);
   const findRow=()=>js(String.raw`((tag) => {const c=v=>String(v||'').replace(/\s+/g,' ').trim();const expected='#'+String(tag).toLowerCase();const containers=[...document.querySelectorAll('[class*="mention-suggest-item-container"],.mention-suggest-mount-dom')].filter(el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'});const rows=containers.flatMap(container=>[...container.querySelectorAll('*')]).map(el=>({text:c(el.innerText||el.textContent||''),r:el.getBoundingClientRect()})).filter(item=>item.r.height>20&&item.r.height<90&&item.r.width>150&&(item.text.toLowerCase()===expected||item.text.toLowerCase().startsWith(expected+' '))).sort((a,b)=>a.text.length-b.text.length);const item=rows[0];return item?{x:item.r.left+Math.min(56,item.r.width/3),y:item.r.top+item.r.height/2,text:item.text}:null})(${JSON.stringify(tag)})`);
@@ -153,7 +197,8 @@ async function addDouyinTopic(tag) {
   if(!row)return {ok:false,reason:'exact douyin topic suggestion missing',tag};await click([row.x,row.y],{label:`commit douyin topic ${tag}`}).catch(()=>{});await wait(1.4);
   let state=await inspectDouyin();let committed=(state.gates.tags.evidence?.selected||[]).some(value=>String(value).toLowerCase()===String(tag).toLowerCase());
   if(!committed){const retry=await findRow();if(retry){await click([retry.x,retry.y],{label:`retry douyin topic ${tag}`}).catch(()=>{});await wait(1.2);state=await inspectDouyin();committed=(state.gates.tags.evidence?.selected||[]).some(value=>String(value).toLowerCase()===String(tag).toLowerCase())}}
-  return committed?{ok:true,text:row.text}:{ok:false,reason:'douyin topic entity was not committed',tag,evidence:state.gates.tags.evidence};
+  if(committed){await pressKey('ArrowRight').catch(()=>{});await cdp('Input.insertText',{text:' '}).catch(()=>{});await wait(.3);return {ok:true,text:row.text}}
+  return {ok:false,reason:'douyin topic entity was not committed',tag,evidence:state.gates.tags.evidence};
 }
 
 async function turnOffDouyinSync() {
@@ -221,8 +266,10 @@ async function mutateDouyin() {
       const beforeUrls = before.gates.cover.evidence?.urls || {};
       const existingDistinct = (beforeUrls.portrait || []).some(url => url && (beforeUrls.landscape || []).some(other => other && other !== url));
       if (existingDistinct && !expectedReceipts.cover) {
+        const current = await inspectDouyin();
         return {
-          ...before,
+          ...current,
+          actions,
           blocker: typedBlocker('STATE_AMBIGUOUS', '抖音页面已有双封面，但正式回执和崩溃恢复 checkpoint 均缺失，无法证明素材身份；拒绝盲目重传', { retryable: false, evidence: { urls: beforeUrls } }),
         };
       }

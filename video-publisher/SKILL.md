@@ -178,6 +178,8 @@ The production orchestrator then passed a real four-platform regression with upl
 
 The onboarded `all_videos_original` policy also passed real mutation without `--confirm-original-rights`. After a targeted Xiaohongshu cover receipt reset, the maintained runner re-uploaded the 3:4 asset on its first attempt; three immediate full four-platform reruns then remained `READY` with no upload or UI mutation work.
 
+A second cold-start regression used a different 308 MB source video and four fresh task spaces. Bilibili quarantined a real foreign draft before upload. Douyin recovered from a visible upload failure with bounded reinjection, then rebuilt a corrupted rich description into the exact body plus five topic entities. Bilibili closed a framework-swallowed cover dialog through its exact scoped completion control. Both platforms wrote fingerprint-bound cover checkpoints. After the main-state receipts were deliberately removed, the next full run restored them from those checkpoints and all four platforms returned `READY` without upload or mutation. Three additional consecutive full reruns were also no-op `READY` passes. No final publish control was clicked.
+
 A passing platform-specific diagnostic still does not replace this system-level regression when scheduler, persistence, or shared-browser behavior changes.
 
 Real creator-page evidence is the acceptance gate for adapter changes. Unit tests validate orchestration and parsing, not live selectors.

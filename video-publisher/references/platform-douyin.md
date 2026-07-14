@@ -8,6 +8,8 @@ Use the 1-5 topic entities supplied by `douyinTopics`, in order. Do not inject a
 
 ## Draft And Editor Recovery
 
+Before opening Ego Lite, read MP4/M4V/MOV duration from its ISO BMFF `mvhd` metadata. Reject a source longer than 900 seconds with `DOUYIN_DURATION_LIMIT`. This boundary is real-tested: a 15:09 HEVC source produced two explicit platform upload failures, while a 14:59 stream copy from the same file, with the same codec, resolution, frame rate, bitrate, and near-identical 1.11 GB size, uploaded successfully. Do not auto-trim or transcode; ask for a shorter export. Do not apply this Douyin-only limit to other platforms.
+
 If the upload page asks whether to continue the last unpublished video, discard that stale upload before starting the confirmed target. Use a real visible click; do not treat hidden dialog text as active.
 
 Treat a visible `上传失败，重新上传` state as terminal evidence for the current upload attempt. Clear the file input, retry the same verified local asset once in the same run, and record the attempt count. Do not spend the whole processing timeout waiting after explicit failure. A second explicit failure is `PLATFORM_REJECTED_ASSET`; a progress state that simply stops advancing remains `UPLOAD_STALLED`.
@@ -71,3 +73,5 @@ final publish not clicked
 This path passed fresh 308 MB, 208 MB, 731 MB, and 533 MB real draft runs on 2026-07-14 and 2026-07-15, including interrupted-upload takeover without reinjection, recovery from explicit upload failures, exact reconstruction of corrupted rich descriptions, whitespace-normalized topic lookup, a long Chinese title that initially lost a character, topic words repeated in prose, delayed landscape-cover receipt repair, checkpoint recovery, and repeated no-op verification.
 
 A later 534 MB run deleted the ready Douyin task space. The same job created a replacement numeric space, re-uploaded and rebuilt only Douyin, produced fresh distinct portrait and landscape cover receipts, preserved the other three ready drafts, and passed repeated no-op verification.
+
+A 1.12 GB default-cover regression then isolated the 15-minute duration boundary: 15:09 failed explicitly twice, while the 14:59 near-equivalent source reached `READY` and stayed no-op `READY` for three reruns. The production preflight now blocks the known-invalid source before any browser work.

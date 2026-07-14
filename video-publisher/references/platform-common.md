@@ -25,6 +25,8 @@ Use `scripts/run-safe-platforms.sh`, which invokes `scripts/v2/publisher.mjs`.
 
 Do not pipeline UI mutations behind unfinished uploads. Live testing showed that overlapping upload processes and UI control can freeze the shared Ego input channel even across isolated task spaces.
 
+Before step 1, validate the exact local media for every selected platform. The shared media preflight checks file existence and reads MP4/M4V/MOV duration from ISO BMFF metadata without an external `ffprobe` dependency. A Douyin source above the real-tested 900-second limit must be excluded before browser work and recorded as `PLATFORM_REJECTED_ASSET`; other valid selected platforms continue through the same run. If no selected platform is eligible, fail before job creation. Never silently trim, transcode, or substitute another source.
+
 The maintained adapter runner also takes an atomic per-platform filesystem lock. A second process targeting the same platform fails before opening Ego instead of overlapping with an active upload, mutation, inspection, or verification. Stale locks from dead processes are removed automatically. This still permits the intended four-platform parallel upload/check phases.
 
 ## Platform Phases

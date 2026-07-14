@@ -18,6 +18,21 @@ function run(command, args, options) {
   });
 }
 
+function box(type, payload) {
+  const buffer = Buffer.alloc(8 + payload.length);
+  buffer.writeUInt32BE(buffer.length, 0);
+  buffer.write(type, 4, "ascii");
+  payload.copy(buffer, 8);
+  return buffer;
+}
+
+function mp4WithDuration(durationSeconds, timescale = 1000) {
+  const payload = Buffer.alloc(20);
+  payload.writeUInt32BE(timescale, 12);
+  payload.writeUInt32BE(Math.round(durationSeconds * timescale), 16);
+  return Buffer.concat([box("ftyp", Buffer.alloc(4)), box("moov", box("mvhd", payload))]);
+}
+
 test("publisher waits for every upload process before serial UI mutation", async () => {
   const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-test-"));
   const log=path.join(root,"events.ndjson");
@@ -90,4 +105,39 @@ test("publisher accepts onboarded all-videos-original policy without a one-run f
   assert.equal(result.code,0,`${result.stderr}\n${result.stdout}`);
   assert.equal(fs.existsSync(log),true,"browser runner should start under the standing originality policy");
   assert.equal(JSON.parse(result.stdout).ready,true);
+});
+
+test("publisher blocks an over-15-minute Douyin video before browser work", async () => {
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-duration-test-"));
+  const videoPath=path.join(root,"too-long.mp4");
+  const packagePath=path.join(root,"package.json");
+  const configPath=path.join(root,"config.json");
+  const log=path.join(root,"events.ndjson");
+  await fs.promises.writeFile(videoPath,mp4WithDuration(901));
+  await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:1,onboarding:{completed:true},sourceDirectory:root,defaultPlatforms:["douyin"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:1,uploadConcurrency:1}}));
+  await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Duration test",douyinTopics:["Test"],cover:{uploadCustomCover:false}}));
+  const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"duration-test","douyin","--state-root",root],{env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),VIDEO_PUBLISHER_V2_MOCK_LOG:log}});
+  assert.equal(result.code,1);
+  assert.match(result.stderr,/DOUYIN_DURATION_LIMIT/);
+  assert.equal(fs.existsSync(log),false,"browser runner must not start for over-limit media");
+});
+
+test("publisher isolates a Douyin duration blocker and still prepares eligible platforms", async () => {
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-partial-preflight-test-"));
+  const videoPath=path.join(root,"too-long-for-douyin.mp4");
+  const packagePath=path.join(root,"package.json");
+  const configPath=path.join(root,"config.json");
+  const log=path.join(root,"events.ndjson");
+  await fs.promises.writeFile(videoPath,mp4WithDuration(901));
+  await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:1,onboarding:{completed:true},sourceDirectory:root,defaultPlatforms:["xiaohongshu","douyin"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:2,uploadConcurrency:2}}));
+  await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Partial preflight",xhsTopics:["Test"],douyinTopics:["Test"],cover:{uploadCustomCover:false}}));
+  const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"partial-preflight","xiaohongshu","douyin","--state-root",root],{env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),VIDEO_PUBLISHER_V2_MOCK_LOG:log}});
+  assert.equal(result.code,10,`${result.stderr}\n${result.stdout}`);
+  const summary=JSON.parse(result.stdout);
+  assert.equal(summary.platforms.xiaohongshu.ready,true);
+  assert.equal(summary.platforms.douyin.ready,false);
+  assert.equal(summary.platforms.douyin.blocker.code,"PLATFORM_REJECTED_ASSET");
+  assert.match(summary.platforms.douyin.blocker.message,/DOUYIN_DURATION_LIMIT/);
+  const events=(await fs.promises.readFile(log,"utf8")).trim().split(/\n/).map(line=>JSON.parse(line));
+  assert.deepEqual(new Set(events.map(item=>item.platform)),new Set(["xiaohongshu"]));
 });

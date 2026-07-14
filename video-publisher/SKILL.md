@@ -141,7 +141,7 @@ Bilibili: 4:3
 WeChat Channels: 3:4 and 4:3
 ```
 
-Run `scripts/check-package.mjs` for every selected platform before browser work.
+Run `scripts/check-package.mjs` for every selected platform before browser work. The validator reads MP4/M4V/MOV duration directly from ISO BMFF metadata without `ffprobe`. For Douyin, reject a source longer than the real-tested 900-second boundary before Ego Lite starts; do not automatically trim or transcode the user's media. This duration rule is platform-specific and must not block the other selected platforms.
 
 ## Default Flow
 
@@ -191,6 +191,8 @@ A sixth regression used a 731 MB source and deliberately terminated the producti
 A seventh cold-start regression used a different 533 MB source, four fresh task spaces, and deliberately terminated the orchestrator after all four file injections. Recovery evidence recorded `resume_existing` for Xiaohongshu, Bilibili, and WeChat Channels; Douyin recorded `resume_existing` followed by an explicit platform failure and then one successful `injected` retry. The sample also exposed package topic names containing spaces: Xiaohongshu and Douyin now query the platform's compact topic name while verifying only real committed entities, never plain hashtag text. The repaired job reached four-platform `READY`, every final guard was armed with zero attempts, and three consecutive full reruns were no-op `READY` passes. No final publish control was clicked.
 
 An eighth cold-start regression used another 534 MB source with a mixed English/Chinese title and a second whitespace-bearing topic set. All four uploads and serialized mutations reached `READY` on the first production run; Douyin handled one explicit first-attempt upload failure and completed its bounded second attempt inside the same upload phase. Three full reruns were no-op `READY` passes. The WeChat Channels task space was then deliberately removed: the same job replaced id 51 with 55, rebuilt only WeChat Channels with fresh two-slot cover receipts, and passed two no-op reruns. The Douyin task space was removed next: the job replaced id 52 with 56, rebuilt only Douyin with fresh distinct portrait/landscape receipts, and passed two more no-op reruns. The other three platforms stayed `READY` during each recovery, every final guard remained armed with zero attempts, and no final publish control was clicked.
+
+A ninth cold-start regression used a 1.12 GB, 15:09 HEVC source with custom-cover upload disabled. Xiaohongshu, Bilibili, and WeChat Channels completed the large upload, accepted platform-default covers, and reached `READY`. Douyin produced the same explicit upload failure twice. A stream-copy sample from the same source kept the codec, resolution, frame rate, bitrate, and approximately 1.11 GB size but ended at 14:59; Douyin uploaded it, accepted all fields and default covers, reached `READY`, and passed three no-op reruns. The package validator and production orchestrator now read ISO BMFF duration locally and stop a Douyin source above 900 seconds before opening its Ego Lite task space. A full four-platform rerun recorded that one platform as `PLATFORM_REJECTED_ASSET` while independently keeping the other three `READY` without upload or UI mutation; a Douyin-only run fails before job creation. Every live final guard remained armed with zero attempts, and no final publish control was clicked.
 
 A passing platform-specific diagnostic still does not replace this system-level regression when scheduler, persistence, or shared-browser behavior changes.
 

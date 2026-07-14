@@ -12,6 +12,7 @@ import {
   validateXiaohongshuPackage,
 } from "../lib/content-package.mjs";
 import { loadConfig } from "../lib/config.mjs";
+import { inspectMediaFile, validateMediaForPlatform } from "../lib/media.mjs";
 import { buildIdentity } from "./lib/identity.mjs";
 import { JobStore } from "./lib/job-store.mjs";
 import { BLOCKER, PLATFORMS, classifyVerdict, compactVerdict, evaluateObservation } from "./lib/model.mjs";
@@ -103,11 +104,18 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!fs.existsSync(args.packagePath)) throw new Error(`Package JSON not found: ${args.packagePath}`);
   const pkg = readPackage(args.packagePath);
-  for (const platform of args.platforms) {
-    const errors = validators[platform](pkg);
-    if (errors.length) throw new Error(`Package preflight failed for ${platform}: ${errors.join("; ")}`);
+  const media = inspectMediaFile(pkg.videoPath);
+  const preflightErrors = Object.fromEntries(args.platforms.map(platform => [platform, [
+    ...validators[platform](pkg),
+    ...validateMediaForPlatform(pkg, platform, media),
+  ]]));
+  const runnablePlatforms = args.platforms.filter(platform => preflightErrors[platform].length === 0);
+  if (!runnablePlatforms.length) {
+    throw new Error(args.platforms
+      .map(platform => `Package preflight failed for ${platform}: ${preflightErrors[platform].join("; ")}`)
+      .join("\n"));
   }
-  const rightsTargets = args.platforms.filter(platform => RIGHTS_PLATFORMS.has(platform));
+  const rightsTargets = runnablePlatforms.filter(platform => RIGHTS_PLATFORMS.has(platform));
   const standingOriginalityPolicy = args.originalityPolicy === "all_videos_original";
   if (!args.inspectOnly && rightsTargets.length && !standingOriginalityPolicy && !args.originalRightsConfirmed) {
     throw new UsageError(`Originality confirmation is required before browser mutation for: ${rightsTargets.join(", ")}. Complete onboarding with declarations.originalityPolicy=all_videos_original, or confirm this run and add --confirm-original-rights.`);
@@ -122,6 +130,31 @@ async function main() {
   for (const platform of args.platforms) {
     const checkpoint = await store.loadReceiptCheckpoint(platform, state.fingerprint);
     if (checkpoint) state.platforms[platform].receipts = { ...checkpoint.receipts, ...(state.platforms[platform].receipts || {}) };
+  }
+  for (const platform of args.platforms.filter(key => preflightErrors[key].length > 0)) {
+    const item = state.platforms[platform];
+    const observedAt = new Date().toISOString();
+    const blocker = {
+      code: BLOCKER.PLATFORM_REJECTED_ASSET,
+      message: preflightErrors[platform].join("; "),
+      retryable: false,
+      requiresUser: false,
+      evidence: { errors: preflightErrors[platform], media },
+    };
+    const observation = {
+      schemaVersion: 1,
+      platform,
+      phase: "preflight",
+      taskSpaceId: item.taskSpaceId ?? null,
+      observedAt,
+      finalPublishClicked: false,
+      gates: {},
+      blocker,
+      evidence: { media },
+    };
+    const verdict = { platform, phase: "preflight", taskSpaceId: item.taskSpaceId ?? null, ready: false, missing: ["preflight"], blocker };
+    item.status = "blocked";
+    await store.record(platform, "preflight", observation, verdict);
   }
   state.status = args.inspectOnly ? "inspecting" : "running";
   await store.save();
@@ -150,16 +183,17 @@ async function main() {
   }
 
   console.error(`[video-publisher-v2] inspect parallel=${args.checkConcurrency}`);
-  await runPool(args.platforms, args.checkConcurrency, platform => invoke(platform, "inspect"));
+  await runPool(runnablePlatforms, args.checkConcurrency, platform => invoke(platform, "inspect"));
   if (args.inspectOnly) {
-    state.status = "inspected";
+    state.status = runnablePlatforms.length === args.platforms.length ? "inspected" : "blocked";
     await store.save();
     await store.close();
     console.log(JSON.stringify(summary(state, args.platforms, store.statePath), null, 2));
+    if (state.status === "blocked") process.exitCode = 10;
     return;
   }
 
-  const userBlocked = args.platforms.find(platform => state.platforms[platform].status === "blocked_user");
+  const userBlocked = runnablePlatforms.find(platform => state.platforms[platform].status === "blocked_user");
   if (userBlocked) {
     state.status = "paused_user";
     await store.save(); await store.close();
@@ -168,30 +202,30 @@ async function main() {
   }
 
   const ui = new SerialQueue();
-  for (const platform of args.platforms.filter(key => state.platforms[key].status === "needs_quarantine")) {
+  for (const platform of runnablePlatforms.filter(key => state.platforms[key].status === "needs_quarantine")) {
     await ui.enqueue(async () => {
       const result = await invoke(platform, "quarantine");
       if (result.observation.quarantine?.safeToUpload) await invoke(platform, "inspect");
     });
   }
 
-  const uploadTargets = args.platforms.filter(platform => state.platforms[platform].status === "needs_upload");
+  const uploadTargets = runnablePlatforms.filter(platform => state.platforms[platform].status === "needs_upload");
   console.error(`[video-publisher-v2] upload parallel=${args.uploadConcurrency}: ${uploadTargets.join(",") || "none"}`);
   await runPool(uploadTargets, args.uploadConcurrency, platform => invoke(platform, "upload"));
 
   // No UI mutation starts until every Ego upload process has exited. Live testing proved
   // that overlap freezes the shared browser input channel even across task spaces.
-  const mutationTargets = args.platforms.filter(platform => state.platforms[platform].status === "needs_mutation");
+  const mutationTargets = runnablePlatforms.filter(platform => state.platforms[platform].status === "needs_mutation");
   console.error(`[video-publisher-v2] UI serial: ${mutationTargets.join(",") || "none"}`);
   for (const platform of mutationTargets) await ui.enqueue(() => invoke(platform, "mutate"));
   await ui.idle();
 
   console.error(`[video-publisher-v2] final verify parallel=${args.checkConcurrency}`);
-  await runPool(args.platforms.filter(platform => state.platforms[platform].status !== "blocked_user"), args.checkConcurrency, platform => invoke(platform, "verify"));
+  await runPool(runnablePlatforms.filter(platform => state.platforms[platform].status !== "blocked_user"), args.checkConcurrency, platform => invoke(platform, "verify"));
 
   // One targeted retry is allowed only for an idempotent mutation whose fresh verifier
   // returned STATE_AMBIGUOUS. Typed action/auth/risk-control failures are never looped.
-  const retryTargets = args.platforms.filter(platform => {
+  const retryTargets = runnablePlatforms.filter(platform => {
     const verdict = state.platforms[platform].verdict;
     return state.platforms[platform].status === "needs_mutation" && verdict?.blocker?.code === BLOCKER.STATE_AMBIGUOUS;
   });

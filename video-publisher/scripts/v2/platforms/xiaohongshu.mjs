@@ -14,17 +14,21 @@ async function inspectXiaohongshu() {
     const editors = [...document.querySelectorAll('[contenteditable="true"], [contenteditable=""]')]
     const editor = editors.find(el => el.querySelector('a') || /话题|creator-editor/i.test(String(el.className || ''))) || editors[0]
     const editorText = compact(editor?.innerText || editor?.textContent || '')
-    const anchors = [...(editor?.querySelectorAll('a') || [])].map(el => compact(el.innerText || el.textContent || ''))
+    const anchorNames = [...(editor?.querySelectorAll('a') || [])].map(el => {
+      try { return String(JSON.parse(el.getAttribute('data-topic') || '{}').name || '').trim() }
+      catch { return compact(el.innerText || el.textContent || '').replace(/^#|\[话题\]#.*$/g, '') }
+    }).filter(Boolean)
     const plainClone = editor?.cloneNode(true)
     plainClone?.querySelectorAll('a').forEach(el => el.remove())
     const plainText = compact(plainClone?.innerText || plainClone?.textContent || '')
     const topicCounts = Object.fromEntries(requestedTopics.map(tag => {
-      const lower = String(tag).toLowerCase()
-      const count = anchors.filter(value => value.toLowerCase().startsWith('#' + lower) && /\[话题\]#/.test(value)).length
+      const normalized = String(tag).replace(/\s+/g, '').toLowerCase()
+      const count = anchorNames.filter(value => String(value).replace(/\s+/g, '').toLowerCase() === normalized).length
       return [tag, count]
     }))
     const selected = requestedTopics.filter(tag => topicCounts[tag] === 1)
-    const plainResidue = requestedTopics.filter(tag => plainText.toLowerCase().includes('#' + String(tag).toLowerCase()))
+    const plainCompact = plainText.replace(/\s+/g, '').toLowerCase()
+    const plainResidue = requestedTopics.filter(tag => plainCompact.includes('#' + String(tag).replace(/\s+/g, '').toLowerCase()))
     const duplicate = requestedTopics.filter(tag => topicCounts[tag] > 1)
     const originalLabels = [...document.querySelectorAll('div,section,label,span')]
       .filter(el => compact(el.innerText || el.textContent || '') === '原创声明')
@@ -93,11 +97,32 @@ async function inspectXiaohongshu() {
   };
 }
 
+async function waitXiaohongshuUploadCompletion(mode) {
+  let stableSince = 0;
+  for (let index = 0; index < 180; index += 1) {
+    const current = await inspectXiaohongshu();
+    const uploaded = current.gates.video.evidence?.uploaded || current.gates.video.ok;
+    const uploading = current.gates.video.evidence?.uploading === true;
+    if (uploaded && !uploading) {
+      if (!stableSince) stableSince = Date.now();
+      if (Date.now() - stableSince >= 10000) return { ...current, actions: { upload: { mode } } };
+    } else {
+      stableSince = 0;
+    }
+    await wait(5);
+  }
+  const after = await inspectXiaohongshu();
+  return { ...after, actions: { upload: { mode } }, blocker: typedBlocker('UPLOAD_STALLED', '小红书视频没有在等待窗口内稳定完成', { retryable: true, evidence: after.gates.video.evidence }) };
+}
+
 async function uploadXiaohongshu() {
   const before = await inspectXiaohongshu();
-  if (before.gates.video.ok) return before;
+  if (before.gates.video.ok) return { ...before, actions: { upload: { mode: 'already_ready' } } };
   if (!before.gates.draftIdentity.ok) {
     return { ...before, blocker: typedBlocker('FOREIGN_DRAFT', '小红书当前编辑器属于其他视频草稿', { evidence: before.gates.draftIdentity.evidence }) };
+  }
+  if (before.gates.video.evidence?.uploading === true) {
+    return await waitXiaohongshuUploadCompletion('resume_existing');
   }
   const exposed = await js(String.raw`(() => {
     const videoLike = value => /video|\.(mp4|mov|flv|f4v|mkv|rmvb?|m4v|mpg|mpeg|ts)\b/i.test(value || '')
@@ -112,21 +137,7 @@ async function uploadXiaohongshu() {
   } catch (error) {
     return { ...before, blocker: typedBlocker('UPLOAD_NOT_STARTED', `小红书文件注入失败: ${String(error?.message || error)}`, { retryable: true }) };
   }
-  let stableSince = 0;
-  for (let index = 0; index < 180; index += 1) {
-    const current = await inspectXiaohongshu();
-    const uploaded = current.gates.video.evidence?.uploaded || current.gates.video.ok;
-    const uploading = current.gates.video.evidence?.uploading === true;
-    if (uploaded && !uploading) {
-      if (!stableSince) stableSince = Date.now();
-      if (Date.now() - stableSince >= 10000) return current;
-    } else {
-      stableSince = 0;
-    }
-    await wait(5);
-  }
-  const after = await inspectXiaohongshu();
-  return { ...after, blocker: typedBlocker('UPLOAD_STALLED', '小红书视频没有在等待窗口内稳定完成', { retryable: true, evidence: after.gates.video.evidence }) };
+  return await waitXiaohongshuUploadCompletion('injected');
 }
 
 async function rebuildXhsTopics() {
@@ -143,6 +154,7 @@ async function rebuildXhsTopics() {
   })()`);
   if (!cleared.ok) return cleared;
   for (const tag of xhsTopics) {
+    const queryTag = String(tag).replace(/\s+/g, '');
     const focused = await js(String.raw`(() => {
       const editors = [...document.querySelectorAll('[contenteditable="true"], [contenteditable=""]')]
       const editor = editors.find(el => /话题|creator-editor/i.test(String(el.className || ''))) || editors[0]
@@ -152,7 +164,7 @@ async function rebuildXhsTopics() {
       return true
     })()`);
     if (!focused) return { ok: false, reason: 'xiaohongshu topic editor lost focus' };
-    await cdp('Input.insertText', { text: `#${tag}` });
+    await cdp('Input.insertText', { text: `#${queryTag}` });
     await wait(1.8);
     const clicked = await js(String.raw`((tag) => {
       const compact = value => String(value || '').replace(/\s+/g, ' ').trim()
@@ -166,11 +178,11 @@ async function rebuildXhsTopics() {
       const row = rows[0]
       if (!row) return { ok: false, reason: 'exact topic suggestion missing', tag }
       row.el.click(); return { ok: true, text: row.text }
-    })(${JSON.stringify(tag)})`);
+    })(${JSON.stringify(queryTag)})`);
     if (!clicked.ok) return clicked;
     await wait(1.2);
     const committed = await js(String.raw`((tag) => [...document.querySelectorAll('[contenteditable] a')]
-      .some(el => (el.innerText || el.textContent || '').toLowerCase().startsWith('#' + String(tag).toLowerCase()) && /\[话题\]#/.test(el.innerText || el.textContent || '')))(${JSON.stringify(tag)})`);
+      .some(el => {let name='';try{name=JSON.parse(el.getAttribute('data-topic')||'{}').name||''}catch{};if(!name)name=String(el.innerText||el.textContent||'').replace(/^#|\[话题\]#.*$/g,'');return name.replace(/\s+/g,'').toLowerCase()===String(tag).replace(/\s+/g,'').toLowerCase()}))(${JSON.stringify(tag)})`);
     if (!committed) return { ok: false, reason: 'topic entity did not commit', tag };
     await cdp('Input.insertText', { text: ' ' });
   }

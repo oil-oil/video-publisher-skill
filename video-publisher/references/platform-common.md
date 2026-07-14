@@ -64,6 +64,16 @@ Every upload adapter must be idempotent:
 - do not inject the same file again merely because metadata is incomplete;
 - block or quarantine when another draft owns the editor.
 
+Every upload observation records one of these action modes:
+
+```text
+already_ready: the target was complete before the upload phase
+resume_existing: the target was already uploading, so the adapter only waited
+injected: this runner injected the verified local file
+```
+
+On process restart, `resume_existing` is the required evidence that an active browser upload was not reinjected. If that resumed upload later shows an explicit platform failure, end the wait with the typed platform failure; a later bounded retry may use `injected` only after the active upload has ended.
+
 ## Draft Identity
 
 Use filename first when the platform exposes it, then confirmed title/description evidence as a fallback.

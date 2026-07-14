@@ -68,11 +68,11 @@ Options:
 
 UI concurrency is fixed at `1` and has no public override.
 
-State defaults to `~/.video-publisher/v2-jobs/<job-id>/`. The job stores the package fingerprint, numeric task-space ids, receipts, observations, compact verdicts, an atomic one-generation `state.backup.json`, and receipt checkpoints under `checkpoints/`. An invalid primary state may recover only from a fingerprint-matching backup; the corrupt file is preserved as `state.corrupt-<timestamp>.json`, after which all platform gates are read again.
+State defaults to `~/.video-publisher/v2-jobs/<job-id>/`. The job stores the package fingerprint, numeric task-space ids, task-space-bound receipts, observations, compact verdicts, an atomic one-generation `state.backup.json`, and schema-`2` receipt checkpoints under `checkpoints/`. An invalid primary state may recover only from a fingerprint-matching backup; the corrupt file is preserved as `state.corrupt-<timestamp>.json`, after which all platform gates are read again.
 
 Before state or browser work, production acquires `~/.video-publisher/v2-jobs/.publisher/orchestrator.lock/owner.json`, then `<job-dir>/orchestrator.lock/owner.json`. The first permits only one video publishing job under the state root while preserving four-platform parallelism inside that job; the second protects its persisted state. A simultaneous different job or duplicate invocation exits immediately. Normal completion removes both locks; a later run removes a stale lock only when the recorded owner PID is dead.
 
-To resume an interrupted run, repeat the same command with the same `--job-id`. The package fingerprint must match. The orchestrator reuses persisted numeric task-space ids and receipts, restores only fingerprint-matching receipt checkpoints, then inspects page truth again before acting. If Ego explicitly proves a recorded id no longer exists after a browser crash, the runner recreates the same named platform space and writes its new id back; ownership or user-control errors never use this fallback.
+To resume an interrupted run, repeat the same command with the same `--job-id`. The package fingerprint must match. The orchestrator reuses persisted numeric task-space ids and restores only checkpoints whose platform, package fingerprint, and task-space id all match, then inspects page truth again before acting. If Ego explicitly proves a recorded id no longer exists after a browser crash, the runner recreates the same named platform space and writes its new id back. An explicit recreation invalidates receipts even when Ego assigns the replacement the same numeric id. Ownership or user-control errors never use this fallback.
 
 Exit codes:
 

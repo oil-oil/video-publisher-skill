@@ -117,6 +117,7 @@ export function evaluateObservation(observation) {
 export function classifyVerdict(verdict) {
   if (verdict.ready) return "ready";
   if (verdict.blocker?.code === BLOCKER.AUTH_REQUIRED || verdict.blocker?.code === BLOCKER.USER_CONTROL) return "blocked_user";
+  if (verdict.blocker?.code === BLOCKER.INPUT_CHANNEL_BROKEN) return "blocked";
   if (verdict.blocker?.code === BLOCKER.FOREIGN_DRAFT) {
     return verdict.platform === "bilibili" ? "needs_quarantine" : "blocked_foreign_draft";
   }

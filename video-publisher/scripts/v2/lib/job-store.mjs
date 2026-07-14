@@ -63,16 +63,21 @@ export class JobStore {
     return path.join(this.checkpointDir, `${platform}.receipts.json`);
   }
 
-  async loadReceiptCheckpoint(platform, fingerprint) {
+  async loadReceiptCheckpoint(platform, fingerprint, taskSpaceId = null) {
     const checkpointPath = this.receiptCheckpointPath(platform);
     if (!fs.existsSync(checkpointPath)) return null;
     try {
       const payload = JSON.parse(await fs.promises.readFile(checkpointPath, "utf8"));
-      if (payload.schemaVersion !== 1 || payload.platform !== platform || payload.fingerprint !== fingerprint || !payload.receipts || typeof payload.receipts !== "object") return null;
+      if (![1, 2].includes(payload.schemaVersion) || payload.platform !== platform || payload.fingerprint !== fingerprint || !payload.receipts || typeof payload.receipts !== "object") return null;
+      if (payload.taskSpaceId != null && taskSpaceId != null && Number(payload.taskSpaceId) !== Number(taskSpaceId)) return null;
       return payload;
     } catch {
       return null;
     }
+  }
+
+  async clearReceiptCheckpoint(platform) {
+    await fs.promises.rm(this.receiptCheckpointPath(platform), { force: true });
   }
 
   save() {

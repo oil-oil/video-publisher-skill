@@ -14,6 +14,7 @@ const PLATFORM_HOSTS = {
 const FINAL_TEXT = /^(发布|发布笔记|发表|立即投稿)$/;
 const FINAL_GUARD_KEY = '__VIDEO_PUBLISHER_FINAL_GUARD__';
 let activeTaskSpace = null;
+let taskSpaceRecovery = null;
 
 const compactText = value => String(value || '').replace(/\s+/g, ' ').trim();
 const unique = values => [...new Set((values || []).filter(Boolean))];
@@ -45,6 +46,7 @@ async function selectTaskSpace() {
     const missingRecordedSpace = typeof ref === 'number' && /task space not found/i.test(String(error?.message || error));
     if (!missingRecordedSpace) throw error;
     activeTaskSpace = await useOrCreateTaskSpace(taskName);
+    taskSpaceRecovery = { recreated: true, previousTaskSpaceId: ref, taskSpaceId: activeTaskSpace?.id ?? null };
   }
   return activeTaskSpace;
 }
@@ -112,9 +114,10 @@ function checkpointReceipts(receipts) {
     return { ok: false, skipped: true };
   }
   const payload = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     platform,
     fingerprint: jobFingerprint,
+    taskSpaceId: activeTaskSpace?.id ?? null,
     writtenAt: new Date().toISOString(),
     receipts,
   };
@@ -224,6 +227,7 @@ async function emitObservation(observation) {
     phase,
     taskSpaceId: activeTaskSpace?.id ?? null,
     taskSpace: activeTaskSpace?.name || taskName,
+    taskSpaceRecovery,
     observedAt: new Date().toISOString(),
     finalPublishClicked: false,
     ...observation,

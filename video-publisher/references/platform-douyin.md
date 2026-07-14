@@ -14,7 +14,7 @@ If the upload page asks whether to continue the last unpublished video, discard 
 
 Treat a visible `上传失败，重新上传` state as terminal evidence for the current upload attempt. Clear the file input, retry the same verified local asset once in the same run, and record the attempt count. Do not spend the whole processing timeout waiting after explicit failure. A second explicit failure is `PLATFORM_REJECTED_ASSET`; a progress state that simply stops advancing remains `UPLOAD_STALLED`.
 
-Clear the rich description editor with a real click inside the editor followed by real `Meta+A` and Backspace, then verify it is empty before rebuilding content. Direct value replacement or DOM-only selection can leave duplicated framework state.
+For an empty or entity-free editor, clear through the maintained focused-editor sequence and verify it is empty before rebuilding content. Never rely on DOM value replacement. Once committed mention entities exist, the editor's framework selection may ignore both DOM-only selection and `Meta+A`; do not attempt a destructive whole-editor clear merely because the last topic failed.
 
 For the native title input, use real focus, the input element's verified full-range selection, real Backspace, and one CDP `Input.insertText` call. Do not type a Chinese title character by character, and do not append unless the field has been freshly proven empty. Retry the bounded clear-and-insert sequence only when the exact value does not persist.
 
@@ -31,6 +31,8 @@ For each topic:
 5. Press real ArrowRight to leave the committed entity, insert one separator space, and verify the entity before continuing.
 
 Accept the platform’s official activity entity form and exact selected `#话题` form. Reject plain hashtag residue and duplicates.
+
+Candidate lookup has a finite three-attempt retry. Before every lookup, prove that the trailing plain query is exactly `#` plus the compact requested topic. If the exact row is absent, preserve the already committed ordered prefix and delete only that failed query with real Backspace events, checking every intermediate tail is still a prefix of the same requested topic. Verify the prior entities and exact prose are unchanged before retrying only the missing topic. A partial editor is recoverable only when its entities are the exact ordered prefix of the package topics and its prose begins with the exact package description; otherwise fail closed.
 
 Count only committed `[data-mention="#"]` or `[data-mention="activity"]` nodes as selected topics. A matching `#topic` string in editor text is residue, not an entity. When a readable package label contains whitespace, query the compact form (for example `AI Agent` -> `AIAgent`) and compare committed entity names after removing whitespace; retain the readable package label in evidence.
 
@@ -81,3 +83,5 @@ A 1.12 GB default-cover regression then isolated the 15-minute duration boundary
 An exact 15:00 stream copy reported 900.010 seconds in ISO BMFF metadata, uploaded on the first diagnostic attempt, and passed exact metadata, five topics, settings, default-cover, final-button, and safety verification. After the 0.1-second tolerance was added, the production orchestrator repeated the upload in a fresh task space, reached `READY`, and passed three no-op reruns. The tolerance exists only for this verified container-rounding behavior.
 
 A later forced process termination left the exact title/body and two of five committed topic entities on the live page. The next production run identified only `tags` as missing, performed no video upload, rebuilt the rich editor without residue or duplicates, and independently verified all five topics.
+
+A sustained-load run later left four valid entities plus the plain fragment `#vibe` after the fifth candidate panel failed. Whole-editor selection could not clear the framework state. The repaired adapter proved the four-entity ordered prefix, removed only the fragment one character at a time (`#vibe` through empty), committed `vibecoding`, uploaded distinct 3:4 and 4:3 covers, and passed fresh `READY` verification plus three full no-op reruns.

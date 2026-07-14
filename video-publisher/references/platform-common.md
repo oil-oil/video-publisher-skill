@@ -27,11 +27,15 @@ Use `scripts/run-safe-platforms.sh`, which invokes `scripts/v2/publisher.mjs`.
 
 Do not pipeline UI mutations behind unfinished uploads. Live testing showed that overlapping upload processes and UI control can freeze the shared Ego input channel even across isolated task spaces.
 
+The browser channel is shared across task spaces. If any runner reports `INPUT_CHANNEL_BROKEN`, treat it as a phase-wide circuit breaker: wait for all already-started parallel runners, skip every remaining quarantine/upload/mutate action, and run only final read-only verification. An ordinary same-job retry after Ego restarts is the recovery path.
+
 Before step 1, validate the exact local media for every selected platform. The shared media preflight checks file existence and reads MP4/M4V/MOV duration from ISO BMFF metadata without an external `ffprobe` dependency. Douyin permits only 0.1 seconds of container rounding above its real-tested 900-second content limit; anything longer must be excluded before browser work and recorded as `PLATFORM_REJECTED_ASSET`. Other valid selected platforms continue through the same run. If no selected platform is eligible, fail before job creation. Never silently trim, transcode, or substitute another source.
 
 The maintained adapter runner also takes an atomic per-platform filesystem lock. A second process targeting the same platform fails before opening Ego instead of overlapping with an active upload, mutation, inspection, or verification. Stale locks from dead processes are removed automatically. This still permits the intended four-platform parallel upload/check phases.
 
 The three lock levels solve different races: the state-root publisher lock serializes video jobs that share creator accounts, the job lock protects one persisted job, and platform locks prevent accidental same-platform overlap as defense in depth. Four-platform upload/check parallelism remains available inside the one owning video job.
+
+Persist the exact task-space name alongside its numeric id. After an Ego crash, ids may be recycled for a different job; a live name mismatch is identity loss, never permission to enter that space. Select or recreate only the stored exact name, invalidate old-space receipts, and verify fresh page truth.
 
 ## Platform Phases
 
@@ -182,3 +186,5 @@ Another 2026-07-15 regression proved that per-job locks were insufficient for tw
 A real process-group `SIGKILL` during four parallel uploads subsequently left all three lock levels plus job state behind. The ordinary same-job retry removed only locks whose PIDs were dead, reused all four numeric task spaces, and received `resume_existing` from every upload adapter. It completed all custom-cover and metadata gates, reached four-platform `READY`, and stayed no-op `READY` for three reruns.
 
 A later Ego Lite process-group crash proved a separate failure boundary. A missing structured browser result is now converted into retryable `INPUT_CHANNEL_BROKEN` evidence with every required gate false, never into upload work or a fatal parse exception. After restart, the explicit task-space recreation signal invalidates stale receipts independently of numeric-id equality. The real recovery rebuilt only lost browser state, reached four-platform `READY`, and passed three further no-op reruns with every final guard armed and zero attempts.
+
+A second real Ego crash during active uploads proved that the broken input channel must stop all later UI work for the entire invocation. The patched orchestrator emitted no mutation phase. On restart, numeric ids recycled into another ready job; exact stable-name matching rejected those collisions. The intended four-platform job recovered to `READY`, and three no-op reruns contained only inspect and verify phases.

@@ -42,11 +42,27 @@ async function selectTaskSpace() {
   const ref = raw && /^\d+$/.test(raw) ? Number(raw) : (raw || taskName);
   try {
     activeTaskSpace = await useOrCreateTaskSpace(ref);
+    const identityMismatch = typeof ref === 'number'
+      && Boolean(taskName)
+      && Boolean(activeTaskSpace?.name)
+      && activeTaskSpace.name !== taskName;
+    if (identityMismatch) {
+      const conflictingTaskSpace = activeTaskSpace;
+      activeTaskSpace = await useOrCreateTaskSpace(taskName);
+      taskSpaceRecovery = {
+        recreated: true,
+        reason: 'task_space_identity_mismatch',
+        previousTaskSpaceId: ref,
+        previousTaskSpaceName: conflictingTaskSpace.name,
+        taskSpaceId: activeTaskSpace?.id ?? null,
+        taskSpaceName: activeTaskSpace?.name || taskName,
+      };
+    }
   } catch (error) {
     const missingRecordedSpace = typeof ref === 'number' && /task space not found/i.test(String(error?.message || error));
     if (!missingRecordedSpace) throw error;
     activeTaskSpace = await useOrCreateTaskSpace(taskName);
-    taskSpaceRecovery = { recreated: true, previousTaskSpaceId: ref, taskSpaceId: activeTaskSpace?.id ?? null };
+    taskSpaceRecovery = { recreated: true, reason: 'task_space_not_found', previousTaskSpaceId: ref, taskSpaceId: activeTaskSpace?.id ?? null, taskSpaceName: activeTaskSpace?.name || taskName };
   }
   return activeTaskSpace;
 }

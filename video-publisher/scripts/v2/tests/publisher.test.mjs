@@ -68,6 +68,23 @@ test("publisher waits for every upload process before serial UI mutation", async
   assert.equal(summary.scheduler.uiConcurrency,1);
 });
 
+test("publisher circuit-breaks all UI mutation after an upload loses Ego", async () => {
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-channel-break-test-"));
+  const log=path.join(root,"events.ndjson");
+  const videoPath=path.join(root,"sample-video.mp4");
+  const packagePath=path.join(root,"package.json");
+  const configPath=path.join(root,"config.json");
+  await fs.promises.writeFile(videoPath,"test video fixture");
+  await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:1,onboarding:{completed:true},sourceDirectory:root,defaultPlatforms:["xiaohongshu","douyin"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:2,uploadConcurrency:2}}));
+  await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Circuit breaker",xhsTopics:["Test"],douyinTopics:["Test"],cover:{uploadCustomCover:false}}));
+  const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"channel-break","xiaohongshu","douyin","--state-root",root],{env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),VIDEO_PUBLISHER_V2_MOCK_LOG:log,VIDEO_PUBLISHER_V2_MOCK_BROKEN_CHANNEL:"douyin:upload"}});
+  assert.equal(result.code,0,`${result.stderr}\n${result.stdout}`);
+  assert.match(result.stderr,/UI serial: none \(input channel broken\)/);
+  const events=(await fs.promises.readFile(log,"utf8")).trim().split(/\n/).map(line=>JSON.parse(line));
+  assert.equal(events.some(item=>item.phase==="mutate"),false,"no platform may mutate after a shared Ego channel failure");
+  assert.equal(events.filter(item=>item.phase==="verify"&&item.event==="start").length,2,"read-only final verification still records page truth");
+});
+
 test("publisher blocks browser work when onboarding is incomplete", async () => {
   const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-onboarding-test-"));
   const configPath=path.join(root,"config.json");
@@ -180,6 +197,32 @@ test("publisher invalidates receipts and checkpoints when Ego recreates a task s
   assert.equal(recycledState.platforms.xiaohongshu.taskSpaceId,99);
   assert.equal(recycledState.platforms.xiaohongshu.receipts.legacyOnly,undefined,"a recreated space must invalidate receipts even when Ego reuses the same numeric id");
   assert.equal(fs.existsSync(checkpointPath),false);
+});
+
+test("publisher preserves the recorded task-space name when a retry changes its display suffix", async () => {
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-task-name-test-"));
+  const videoPath=path.join(root,"sample-video.mp4");
+  const packagePath=path.join(root,"package.json");
+  const configPath=path.join(root,"config.json");
+  const jobId="stable-task-name-job";
+  await fs.promises.writeFile(videoPath,"test video fixture");
+  await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:1,onboarding:{completed:true},sourceDirectory:root,defaultPlatforms:["xiaohongshu"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:1,uploadConcurrency:1}}));
+  await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Stable task name",xhsTopics:["Test"],cover:{uploadCustomCover:false}}));
+  const base=[path.join(V2_DIR,"publisher.mjs"),packagePath];
+  const tail=["xiaohongshu","--job-id",jobId,"--state-root",root];
+  const env={...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs")};
+  const first=await run(process.execPath,[...base,"original-suffix",...tail],{env});
+  assert.equal(first.code,0,`${first.stderr}\n${first.stdout}`);
+  const statePath=path.join(root,jobId,"state.json");
+  const firstState=JSON.parse(await fs.promises.readFile(statePath,"utf8"));
+  const recordedName=firstState.platforms.xiaohongshu.taskSpaceName;
+  assert.equal(recordedName,`video publisher v2 xiaohongshu original-suffix-${jobId}`);
+  delete firstState.platforms.xiaohongshu.taskSpaceName;
+  await fs.promises.writeFile(statePath,JSON.stringify(firstState,null,2));
+  const second=await run(process.execPath,[...base,"changed-suffix",...tail],{env});
+  assert.equal(second.code,0,`${second.stderr}\n${second.stdout}`);
+  const recovered=JSON.parse(await fs.promises.readFile(statePath,"utf8"));
+  assert.equal(recovered.platforms.xiaohongshu.taskSpaceName,recordedName,"legacy state should recover the stable name from its last evidence");
 });
 
 test("two publishers for the same job produce one winner and one immediate refusal", async () => {

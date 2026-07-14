@@ -98,7 +98,7 @@ function initialState(jobId, identity, args) {
     scheduler: { checkConcurrency: args.checkConcurrency, uploadConcurrency: args.uploadConcurrency, uiConcurrency: 1 },
     video: identity.video,
     assets: identity.assets,
-    platforms: Object.fromEntries(args.platforms.map(platform => [platform, { status: "new", taskSpaceId: null, receipts: {}, verdict: null, history: [] }])),
+    platforms: Object.fromEntries(args.platforms.map(platform => [platform, { status: "new", taskSpaceId: null, taskSpaceName: null, receipts: {}, verdict: null, history: [] }])),
   };
 }
 
@@ -137,9 +137,18 @@ async function main() {
     console.error(`[video-publisher-v2] restored corrupt job state from atomic backup; preserved=${store.lastRecovery.corruptPath}`);
   }
   if (state.fingerprint !== identity.fingerprint) throw new Error(`Job ${jobId} belongs to another package`);
-  for (const platform of args.platforms) state.platforms[platform] ||= { status: "new", taskSpaceId: null, receipts: {}, verdict: null, history: [] };
+  for (const platform of args.platforms) state.platforms[platform] ||= { status: "new", taskSpaceId: null, taskSpaceName: null, receipts: {}, verdict: null, history: [] };
   for (const platform of args.platforms) {
     const item = state.platforms[platform];
+    if (!item.taskSpaceName && item.lastEvidencePath && fs.existsSync(item.lastEvidencePath)) {
+      try {
+        const saved = JSON.parse(fs.readFileSync(item.lastEvidencePath, "utf8"));
+        const observation = saved.observation || saved;
+        if (observation.taskSpace && (item.taskSpaceId == null || Number(observation.taskSpaceId) === Number(item.taskSpaceId))) {
+          item.taskSpaceName = observation.taskSpace;
+        }
+      } catch {}
+    }
     if (item.receiptTaskSpaceId != null && item.taskSpaceId != null && Number(item.receiptTaskSpaceId) !== Number(item.taskSpaceId)) {
       item.receipts = {};
       item.receiptTaskSpaceId = null;
@@ -180,6 +189,7 @@ async function main() {
   await store.save();
 
   const runnerPath = path.resolve(process.env.VIDEO_PUBLISHER_V2_RUNNER || path.join(DIR, "run-platform.mjs"));
+  let inputChannelBroken = false;
   async function invoke(platform, phase) {
     const item = state.platforms[platform];
     const previousTaskSpaceId = item.taskSpaceId;
@@ -191,9 +201,11 @@ async function main() {
         VIDEO_PUBLISHER_V2_RECEIPTS: JSON.stringify(item.receipts || {}),
         VIDEO_PUBLISHER_V2_CHECKPOINT_PATH: store.receiptCheckpointPath(platform),
         VIDEO_PUBLISHER_V2_FINGERPRINT: state.fingerprint,
+        VIDEO_PUBLISHER_V2_TASK_NAME: item.taskSpaceName || "",
       },
     });
     const observation = parseV2Result(`${execution.stdout}\n${execution.stderr}`);
+    if (observation.taskSpace) item.taskSpaceName = observation.taskSpace;
     const taskSpaceChanged = previousTaskSpaceId != null && observation.taskSpaceId != null
       && Number(previousTaskSpaceId) !== Number(observation.taskSpaceId);
     const taskSpaceRecreated = observation.taskSpaceRecovery?.recreated === true;
@@ -215,6 +227,7 @@ async function main() {
       item.receiptTaskSpaceId = observation.taskSpaceId ?? item.taskSpaceId ?? null;
     }
     const verdict = evaluateObservation(observation);
+    if (verdict.blocker?.code === BLOCKER.INPUT_CHANNEL_BROKEN) inputChannelBroken = true;
     item.status = classifyVerdict(verdict);
     if (observation.blocker) item.status = verdict.blocker?.requiresUser ? "blocked_user" : "blocked";
     await store.record(platform, phase, observation, compactVerdict(verdict));
@@ -242,22 +255,30 @@ async function main() {
   }
 
   const ui = new SerialQueue();
-  for (const platform of runnablePlatforms.filter(key => state.platforms[key].status === "needs_quarantine")) {
+  const quarantineTargets = inputChannelBroken ? [] : runnablePlatforms.filter(key => state.platforms[key].status === "needs_quarantine");
+  for (const platform of quarantineTargets) {
+    if (inputChannelBroken) break;
     await ui.enqueue(async () => {
       const result = await invoke(platform, "quarantine");
       if (result.observation.quarantine?.safeToUpload) await invoke(platform, "inspect");
     });
   }
 
-  const uploadTargets = runnablePlatforms.filter(platform => state.platforms[platform].status === "needs_upload");
+  const uploadTargets = inputChannelBroken ? [] : runnablePlatforms.filter(platform => state.platforms[platform].status === "needs_upload");
   console.error(`[video-publisher-v2] upload parallel=${args.uploadConcurrency}: ${uploadTargets.join(",") || "none"}`);
   await runPool(uploadTargets, args.uploadConcurrency, platform => invoke(platform, "upload"));
 
   // No UI mutation starts until every Ego upload process has exited. Live testing proved
   // that overlap freezes the shared browser input channel even across task spaces.
-  const mutationTargets = runnablePlatforms.filter(platform => state.platforms[platform].status === "needs_mutation");
-  console.error(`[video-publisher-v2] UI serial: ${mutationTargets.join(",") || "none"}`);
-  for (const platform of mutationTargets) await ui.enqueue(() => invoke(platform, "mutate"));
+  // A broken browser input channel is also a phase-wide circuit breaker: wait for the
+  // parallel runners, skip every later mutation, and let final read-only verification
+  // record whatever page truth Ego exposes after restart.
+  const mutationTargets = inputChannelBroken ? [] : runnablePlatforms.filter(platform => state.platforms[platform].status === "needs_mutation");
+  console.error(`[video-publisher-v2] UI serial: ${mutationTargets.join(",") || "none"}${inputChannelBroken ? " (input channel broken)" : ""}`);
+  for (const platform of mutationTargets) {
+    if (inputChannelBroken) break;
+    await ui.enqueue(() => invoke(platform, "mutate"));
+  }
   await ui.idle();
 
   console.error(`[video-publisher-v2] final verify parallel=${args.checkConcurrency}`);
@@ -265,11 +286,14 @@ async function main() {
 
   // One targeted retry is allowed only for an idempotent mutation whose fresh verifier
   // returned STATE_AMBIGUOUS. Typed action/auth/risk-control failures are never looped.
-  const retryTargets = runnablePlatforms.filter(platform => {
+  const retryTargets = (inputChannelBroken ? [] : runnablePlatforms).filter(platform => {
     const verdict = state.platforms[platform].verdict;
     return state.platforms[platform].status === "needs_mutation" && verdict?.blocker?.code === BLOCKER.STATE_AMBIGUOUS;
   });
-  for (const platform of retryTargets) await ui.enqueue(() => invoke(platform, "mutate"));
+  for (const platform of retryTargets) {
+    if (inputChannelBroken) break;
+    await ui.enqueue(() => invoke(platform, "mutate"));
+  }
   await ui.idle();
   if (retryTargets.length) await runPool(retryTargets, args.checkConcurrency, platform => invoke(platform, "verify"));
 

@@ -6,6 +6,8 @@ Read this file and the exact platform reference before changing a live adapter.
 
 One orchestrator owns all platform task spaces. Do not use sub Agents for live creator-page control.
 
+Acquire the job-directory `orchestrator.lock` before reading or writing job state or starting a platform phase. A second process for the same job must fail immediately instead of splitting platform locks with the first process. Remove the lock on every normal exit; after a crash, remove it only when its recorded PID is no longer alive. A fresh lock whose owner file is still being written remains busy.
+
 Never click a final `发布`, `发布笔记`, `发表`, or `立即投稿` button without explicit authorization in the current run. Every adapter result must leave `finalPublishClicked: false`. The shared core installs a capture-phase click/submit guard; safety passes only when `guardArmed: true` and `blockedAttempts: 0` are observed from the live page.
 
 If Ego reports that the user controls a task space, stop the whole browser job. Do not retry, create a replacement task space, or claim it without explicit user confirmation.
@@ -28,6 +30,8 @@ Do not pipeline UI mutations behind unfinished uploads. Live testing showed that
 Before step 1, validate the exact local media for every selected platform. The shared media preflight checks file existence and reads MP4/M4V/MOV duration from ISO BMFF metadata without an external `ffprobe` dependency. Douyin permits only 0.1 seconds of container rounding above its real-tested 900-second content limit; anything longer must be excluded before browser work and recorded as `PLATFORM_REJECTED_ASSET`. Other valid selected platforms continue through the same run. If no selected platform is eligible, fail before job creation. Never silently trim, transcode, or substitute another source.
 
 The maintained adapter runner also takes an atomic per-platform filesystem lock. A second process targeting the same platform fails before opening Ego instead of overlapping with an active upload, mutation, inspection, or verification. Stale locks from dead processes are removed automatically. This still permits the intended four-platform parallel upload/check phases.
+
+The job lock and platform locks solve different races: the first serializes one persisted job, while the latter prevents two different jobs from controlling the same platform simultaneously.
 
 ## Platform Phases
 

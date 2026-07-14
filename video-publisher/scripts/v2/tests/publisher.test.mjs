@@ -141,3 +141,23 @@ test("publisher isolates a Douyin duration blocker and still prepares eligible p
   const events=(await fs.promises.readFile(log,"utf8")).trim().split(/\n/).map(line=>JSON.parse(line));
   assert.deepEqual(new Set(events.map(item=>item.platform)),new Set(["xiaohongshu"]));
 });
+
+test("two publishers for the same job produce one winner and one immediate refusal", async () => {
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-double-run-test-"));
+  const videoPath=path.join(root,"sample-video.mp4");
+  const packagePath=path.join(root,"package.json");
+  const configPath=path.join(root,"config.json");
+  const log=path.join(root,"events.ndjson");
+  await fs.promises.writeFile(videoPath,"test video fixture");
+  await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:1,onboarding:{completed:true},sourceDirectory:root,defaultPlatforms:["xiaohongshu"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:1,uploadConcurrency:1}}));
+  await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Double run",xhsTopics:["Test"],cover:{uploadCustomCover:false}}));
+  const args=[path.join(V2_DIR,"publisher.mjs"),packagePath,"double-run","xiaohongshu","--job-id","shared-job","--state-root",root];
+  const options={env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),VIDEO_PUBLISHER_V2_MOCK_LOG:log}};
+  const results=await Promise.all([run(process.execPath,args,options),run(process.execPath,args,options)]);
+  assert.deepEqual(results.map(item=>item.code).sort(),[0,1]);
+  const winner=results.find(item=>item.code===0);
+  const refused=results.find(item=>item.code===1);
+  assert.equal(JSON.parse(winner.stdout).ready,true);
+  assert.match(refused.stderr,/already running.+refusing a second orchestrator/);
+  assert.equal(fs.existsSync(path.join(root,"shared-job","orchestrator.lock")),false);
+});

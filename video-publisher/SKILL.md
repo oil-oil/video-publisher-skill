@@ -48,6 +48,8 @@ This invokes `scripts/v2/publisher.mjs`. The older Agent-per-platform implementa
 
 Use one orchestrator and one Ego Lite task space per platform. Do not delegate live browser control to sub Agents. Agents may help prepare copy or inspect saved artifacts, but they must not control creator tabs.
 
+The publisher enforces one orchestrator per job with an atomic job-directory lock before any state write or browser phase. A duplicate invocation must fail immediately while the owner continues; a lock whose recorded PID is dead is stale and may be removed automatically. Keep the separate platform locks as defense in depth across different jobs.
+
 Schedule by resource type:
 
 ```text
@@ -201,6 +203,8 @@ A tenth boundary regression stream-copied exactly 15:00 from that source. ISO BM
 An eleventh four-platform regression used a fresh 94 MB H.264 source and platform-default covers, then terminated the orchestrator during serialized Douyin topic insertion after every upload had completed and Xiaohongshu had reached `READY`. Fresh recovery evidence found the exact Douyin title and body plus exactly two of five committed topics; it reported only `tags` missing. The same job reused all four task-space ids, performed no video upload, rebuilt the Douyin rich editor without duplication, completed Bilibili and WeChat Channels serially, and reached four-platform `READY`. Three additional full reruns were no-op `READY` passes. Every final guard remained armed with zero attempts, and no final publish control was clicked.
 
 A twelfth cold-start regression used a real 45 MB, 27-second, 120fps MOV with two whitespace-bearing topic names and platform-default covers. All four platforms accepted the MOV and reached `READY`; three full reruns were no-op passes. Deliberately corrupting the completed job's `state.json` first reproduced a fatal JSON parse. After adding atomic state backups, a second corruption was preserved as a timestamped artifact, the matching backup restored all four numeric task-space ids, and fresh inspection/verification returned four-platform `READY` with no upload or UI mutation. A further no-op rerun remained `READY`; all final guards stayed armed with zero attempts.
+
+A thirteenth regression started two production orchestrators against that same ready four-platform job at the same instant. With only platform locks, each process acquired a different subset, both failed, and the shared job was left `running`. The new job-level atomic lock made the same real double launch deterministic: one invocation was refused before state/browser work while the owner completed four-platform `READY`. A deliberately planted dead-PID job lock was then removed automatically, the job remained no-op `READY`, and the lock was released after completion.
 
 A passing platform-specific diagnostic still does not replace this system-level regression when scheduler, persistence, or shared-browser behavior changes.
 

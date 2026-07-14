@@ -24,22 +24,22 @@ async function inspectDouyin() {
     const editor = editables[0]?.el || null
     const editorText = compact(editor?.innerText || editor?.textContent || '').replace(/\u200b/g,'').trim()
     const scope = editor || document
-    const requestedSet = new Set(requestedTopics.map(tag=>String(tag).toLowerCase()))
-    const nodes = [...scope.querySelectorAll('[data-mention], [data-fake-text], span, a, div')]
-      .map(el => { const r=el.getBoundingClientRect(),s=getComputedStyle(el),value=compact(el.innerText||el.textContent||''); const normalized=value.replace(/^#/,'').toLowerCase(); const cls=String(el.className||''); const mention=el.getAttribute('data-mention')||''; const fake=el.getAttribute('data-fake-text')||''; const entityLike=mention==='#'||mention==='activity'||fake.includes('#')||/mention|hash|topic|tag/i.test(cls)||/rgb\(1, 118, 247\)/.test(s.color)||/rgb\(255, 232, 233\)/.test(s.backgroundColor); return {value,normalized,cls,mention,fake,entityLike,w:r.width,h:r.height} })
-      .filter(item=>item.w>4&&item.h>4&&item.entityLike&&requestedSet.has(item.normalized))
+    const normalizeTopic=value=>String(value||'').replace(/^#/,'').replace(/\s+/g,'').toLowerCase()
+    const entityNames = [...scope.querySelectorAll('[data-mention="#"], [data-mention="activity"]')]
+      .map(el=>normalizeTopic(compact(el.innerText||el.textContent||'')))
+      .filter(Boolean)
     const escapeRegExp=value=>String(value).replace(/[.*+?^$(){}|[\]\\]/g,'\\$&')
-    const tokenCounts=Object.fromEntries(requestedTopics.map(tag=>{const re=new RegExp('(?:^|[\\s\\u200b])#'+escapeRegExp(tag)+'(?=$|[\\s\\u200b])','gi');return [tag,[...String(editor?.innerText||editor?.textContent||'').matchAll(re)].length]}))
-    const selected = requestedTopics.filter(tag=>nodes.some(node=>node.normalized===String(tag).toLowerCase())||tokenCounts[tag]===1)
+    const tokenCounts=Object.fromEntries(requestedTopics.map(tag=>[tag,entityNames.filter(name=>name===normalizeTopic(tag)).length]))
+    const selected = requestedTopics.filter(tag=>tokenCounts[tag]===1)
     const duplicates = requestedTopics.filter(tag=>tokenCounts[tag]>1)
     const clone = editor?.cloneNode(true)
     clone?.querySelectorAll('[data-mention], [data-fake-text], [class*="mention"], [class*="topic"], [class*="hash"]').forEach(el=>el.remove())
     let proseRaw=String(clone?.innerText||clone?.textContent||'').replace(/\u200b/g,' ')
-    for(const tag of requestedTopics)proseRaw=proseRaw.replace(new RegExp('(?:^|\\s)#'+escapeRegExp(tag)+'(?=$|\\s)','gi'),' ')
+    const plainNormalized=proseRaw.replace(/\s+/g,'').toLowerCase()
+    const plainResidue=requestedTopics.filter(tag=>plainNormalized.includes('#'+normalizeTopic(tag)))
+    for(const tag of requestedTopics){for(const form of [...new Set([String(tag),String(tag).replace(/\s+/g,'')])])proseRaw=proseRaw.replace(new RegExp('(?:^|\\s)#'+escapeRegExp(form)+'(?=$|\\s)','gi'),' ')}
     const prose = compact(proseRaw)
     const expectedProse = compact(expectedDescription)
-    const residueTail = expectedProse && prose.startsWith(expectedProse) ? prose.slice(expectedProse.length).trim() : prose
-    const plainResidue = requestedTopics.filter(tag=>new RegExp('(?:^|\\s)'+escapeRegExp(tag)+'(?=$|\\s)','i').test(residueTail))
     const uploadSucceeded = /上传成功|重新上传/.test(text) && /作品描述|基础信息/.test(text)
     const uploading = /上传过程中|取消上传|上传剩余时间|已上传：|上传速度|当前速度/.test(text) && !/上传成功/.test(text)
     const uploadFailed = /上传失败|网络错误|重新上传失败/.test(text)
@@ -96,10 +96,29 @@ async function inspectDouyin() {
   };
 }
 
+async function waitExistingDouyinUpload() {
+  let stableSince=0;
+  for(let i=0;i<180;i+=1){
+    await wait(5);
+    const current=await inspectDouyin();
+    const video=current.gates.video.evidence||{};
+    if(current.gates.video.ok){
+      if(!stableSince)stableSince=Date.now();
+      if(Date.now()-stableSince>=10000)return {...current,actions:{upload:{mode:'resume_existing'}}};
+    }else stableSince=0;
+    if(video.failed===true&&!video.uploading){
+      return {...current,actions:{upload:{mode:'resume_existing',result:'explicit_failure'}},blocker:typedBlocker('PLATFORM_REJECTED_ASSET','抖音恢复中的视频明确显示上传失败',{retryable:true,evidence:video})};
+    }
+  }
+  const after=await inspectDouyin();
+  return {...after,actions:{upload:{mode:'resume_existing'}},blocker:typedBlocker('UPLOAD_STALLED','抖音恢复中的视频没有在等待窗口内稳定完成',{retryable:true,evidence:after.gates.video.evidence})};
+}
+
 async function uploadDouyin() {
   let before=await inspectDouyin();
-  if(before.gates.video.ok)return before;
+  if(before.gates.video.ok)return {...before,actions:{upload:{mode:'already_ready'}}};
   if(!before.gates.draftIdentity.ok)return {...before,blocker:typedBlocker('FOREIGN_DRAFT','抖音当前编辑器属于其他视频草稿',{evidence:before.gates.draftIdentity.evidence})};
+  if(before.gates.video.evidence?.uploading===true)return await waitExistingDouyinUpload();
   if(before.gates.video.evidence?.resumeDialog){
     const point=await js(String.raw`(() => {const c=v=>String(v||'').replace(/\s+/g,' ').trim();const item=[...document.querySelectorAll('button,[role="button"],div,span')].map(el=>({el,text:c(el.innerText||el.textContent||''),r:el.getBoundingClientRect()})).filter(x=>x.text==='放弃'&&x.r.width>12&&x.r.height>=8&&x.r.width<160&&x.r.height<70).sort((a,b)=>a.r.width*a.r.height-b.r.width*b.r.height)[0];if(!item)return null;const r=item.r;return{x:r.left+r.width/2,y:r.top+r.height/2}})()`);
     if(!point)return {...before,blocker:typedBlocker('SELECTOR_DRIFT','douyin discard button missing')};
@@ -120,7 +139,7 @@ async function uploadDouyin() {
       if(video.uploading||video.failed!==true)activityObserved=true;
       if(current.gates.video.ok){
         if(!stableSince)stableSince=Date.now();
-        if(Date.now()-stableSince>=10000)return {...current,actions:{uploadAttempts:attempts.concat({attempt,result:'ready'})}};
+        if(Date.now()-stableSince>=10000)return {...current,actions:{upload:{mode:'injected'},uploadAttempts:attempts.concat({attempt,result:'ready'})}};
       }else stableSince=0;
       if(video.failed===true&&!video.uploading&&(activityObserved||i>=5)){
         attempts.push({attempt,result:'explicit_failure',evidence:video});
@@ -128,13 +147,13 @@ async function uploadDouyin() {
       }
     }
     const after=await inspectDouyin();
-    if(after.gates.video.ok)return {...after,actions:{uploadAttempts:attempts.concat({attempt,result:'ready'})}};
+    if(after.gates.video.ok)return {...after,actions:{upload:{mode:'injected'},uploadAttempts:attempts.concat({attempt,result:'ready'})}};
     const video=after.gates.video.evidence||{};
     if(video.failed===true&&attempt<2){await wait(2);before=after;continue;}
     const blocker=video.failed===true
       ? typedBlocker('PLATFORM_REJECTED_ASSET','抖音明确显示视频上传失败，已完成一次有界重试',{retryable:true,evidence:{attempts,video}})
       : typedBlocker('UPLOAD_STALLED','抖音视频没有在等待窗口内稳定完成',{retryable:true,evidence:{attempts,video}});
-    return {...after,actions:{uploadAttempts:attempts},blocker};
+    return {...after,actions:{upload:{mode:'injected'},uploadAttempts:attempts},blocker};
   }
   const after=await inspectDouyin();
   return {...after,blocker:typedBlocker('UPLOAD_STALLED','抖音视频重试后仍未稳定完成',{retryable:true,evidence:after.gates.video.evidence})};
@@ -202,16 +221,17 @@ async function clearAndFillDouyinBody() {
 }
 
 async function addDouyinTopic(tag) {
+  const queryTag=String(tag).replace(/\s+/g,'');
   const focused=await focusDouyinEditorEnd();
   if(!focused.ok)return focused;
   await cdp('Input.insertText',{text:' '});await wait(.2);
   const buttonPoint=await js(String.raw`(() => {const c=v=>String(v||'').replace(/\s+/g,' ').trim();const item=[...document.querySelectorAll('button,[role="button"],div,span')].map(el=>({el,text:c(el.innerText||el.textContent||''),r:el.getBoundingClientRect()})).filter(x=>x.text==='#添加话题'&&x.r.width>20&&x.r.width<140&&x.r.height>=8&&x.r.height<50).sort((a,b)=>a.r.width*a.r.height-b.r.width*b.r.height)[0];if(!item)return null;item.el.scrollIntoView({block:'center',inline:'center'});const r=item.el.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`);
-  if(!buttonPoint)return {ok:false,reason:'douyin add-topic button missing'};await click([buttonPoint.x,buttonPoint.y],{label:`open douyin topic ${tag}`}).catch(()=>{});await wait(.7);await cdp('Input.insertText',{text:String(tag).trim()});await wait(2.4);
-  const findRow=()=>js(String.raw`((tag) => {const c=v=>String(v||'').replace(/\s+/g,' ').trim();const expected='#'+String(tag).toLowerCase();const containers=[...document.querySelectorAll('[class*="mention-suggest-item-container"],.mention-suggest-mount-dom')].filter(el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'});const rows=containers.flatMap(container=>[...container.querySelectorAll('*')]).map(el=>({text:c(el.innerText||el.textContent||''),r:el.getBoundingClientRect()})).filter(item=>item.r.height>20&&item.r.height<90&&item.r.width>150&&(item.text.toLowerCase()===expected||item.text.toLowerCase().startsWith(expected+' '))).sort((a,b)=>a.text.length-b.text.length);const item=rows[0];return item?{x:item.r.left+Math.min(56,item.r.width/3),y:item.r.top+item.r.height/2,text:item.text}:null})(${JSON.stringify(tag)})`);
+  if(!buttonPoint)return {ok:false,reason:'douyin add-topic button missing'};await click([buttonPoint.x,buttonPoint.y],{label:`open douyin topic ${tag}`}).catch(()=>{});await wait(.7);await cdp('Input.insertText',{text:queryTag});await wait(2.4);
+  const findRow=()=>js(String.raw`((tag) => {const c=v=>String(v||'').replace(/\s+/g,' ').trim();const expected='#'+String(tag).toLowerCase();const containers=[...document.querySelectorAll('[class*="mention-suggest-item-container"],.mention-suggest-mount-dom')].filter(el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'});const rows=containers.flatMap(container=>[...container.querySelectorAll('*')]).map(el=>({text:c(el.innerText||el.textContent||''),r:el.getBoundingClientRect()})).filter(item=>item.r.height>20&&item.r.height<90&&item.r.width>150&&(item.text.toLowerCase()===expected||item.text.toLowerCase().startsWith(expected+' '))).sort((a,b)=>a.text.length-b.text.length);const item=rows[0];return item?{x:item.r.left+Math.min(56,item.r.width/3),y:item.r.top+item.r.height/2,text:item.text}:null})(${JSON.stringify(queryTag)})`);
   let row=null;for(let attempt=0;attempt<5&&!row;attempt+=1){row=await findRow();if(!row)await wait(.8)}
   if(!row)return {ok:false,reason:'exact douyin topic suggestion missing',tag};await click([row.x,row.y],{label:`commit douyin topic ${tag}`}).catch(()=>{});await wait(1.4);
-  let state=await inspectDouyin();let committed=(state.gates.tags.evidence?.selected||[]).some(value=>String(value).toLowerCase()===String(tag).toLowerCase());
-  if(!committed){const retry=await findRow();if(retry){await click([retry.x,retry.y],{label:`retry douyin topic ${tag}`}).catch(()=>{});await wait(1.2);state=await inspectDouyin();committed=(state.gates.tags.evidence?.selected||[]).some(value=>String(value).toLowerCase()===String(tag).toLowerCase())}}
+  let state=await inspectDouyin();let committed=(state.gates.tags.evidence?.selected||[]).some(value=>String(value).replace(/\s+/g,'').toLowerCase()===String(tag).replace(/\s+/g,'').toLowerCase());
+  if(!committed){const retry=await findRow();if(retry){await click([retry.x,retry.y],{label:`retry douyin topic ${tag}`}).catch(()=>{});await wait(1.2);state=await inspectDouyin();committed=(state.gates.tags.evidence?.selected||[]).some(value=>String(value).replace(/\s+/g,'').toLowerCase()===String(tag).replace(/\s+/g,'').toLowerCase())}}
   if(committed){await pressKey('ArrowRight').catch(()=>{});await cdp('Input.insertText',{text:' '}).catch(()=>{});await wait(.3);return {ok:true,text:row.text}}
   return {ok:false,reason:'douyin topic entity was not committed',tag,evidence:state.gates.tags.evidence};
 }
@@ -273,7 +293,7 @@ async function mutateDouyin() {
     for (const tag of douyinTopics) {
       const added = await addDouyinTopic(tag);
       (actions.topics ||= []).push({ tag, ...added });
-      if (!added.ok) return { ...(await inspectDouyin()), blocker: typedBlocker('ACTION_FAILED', added.reason, { evidence: added }) };
+      if (!added.ok) return { ...(await inspectDouyin()), actions, blocker: typedBlocker('ACTION_FAILED', added.reason, { evidence: added }) };
     }
   }
   actions.settings = await turnOffDouyinSync();

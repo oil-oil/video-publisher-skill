@@ -24,6 +24,8 @@ Do not equate “target not found” with “no active upload”. This false equ
 
 Both same-target resume and a real foreign-draft save/clean-page flow passed live testing. A later task-space-loss test recreated the Bilibili space, resumed the same target with no video upload, and repaired only the page state that did not survive the restore.
 
+A separate 533 MB fault test terminated the orchestrator while Bilibili was actively uploading. The same task space resumed with upload action mode `resume_existing`, completed without another file injection, and independently reached `READY`.
+
 ## Metadata And Declarations
 
 Set and independently verify:

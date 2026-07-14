@@ -21,6 +21,8 @@ Do not mutate metadata until the upload phase has fully completed and every sele
 
 Clear the body editor completely, then add topics one at a time through the real suggestion panel.
 
+Spaces terminate Xiaohongshu topic input. When a readable package label contains whitespace, query the compact form (for example `AI Agent` -> `AIAgent`) and accept it only when the committed entity's `data-topic.name`, normalized without whitespace, matches the requested label. Preserve the readable package label in evidence. Never accept compact plain text as a substitute for an entity.
+
 The verifier must prove:
 
 - every requested topic exists as a committed entity;
@@ -59,4 +61,4 @@ visible enabled 发布 button
 visible enabled `发布笔记` final button; final publish not clicked
 ```
 
-This path passed a real draft run on 2026-07-14. The visible-tab polling path was then fault-tested by discarding the receipt and re-uploading the same 3:4 asset; it succeeded on the first maintained-run attempt and remained verifiable across subsequent four-platform runs.
+This path passed real draft runs on 2026-07-14 and 2026-07-15. The visible-tab polling path was fault-tested by discarding the receipt and re-uploading the same 3:4 asset. Later 731 MB and 533 MB runs survived orchestrator termination during upload without reinjection, and the 533 MB run verified whitespace-normalized topic lookup plus three no-op full reruns.

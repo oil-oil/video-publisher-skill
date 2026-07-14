@@ -44,6 +44,8 @@ That state is uploading, not ready.
 
 Require cover cards and the absence of all progress signals, including percentage text and `取消上传`, for a stable interval before the upload runner exits. If an existing target upload is in progress, wait for it; do not inject again.
 
+A 533 MB fault test terminated the orchestrator during the Wujie upload. The same task space resumed with action mode `resume_existing`, reactivated the page lifecycle while waiting, completed without reinjection, and later reached `READY` with both cover slots verified.
+
 ## Draft Identity
 
 The page does not expose a reliable filename. Reuse an uploaded draft only when the description is empty or matches the expected package. A different non-empty description is foreign and must block.

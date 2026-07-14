@@ -28,6 +28,8 @@ For each topic:
 
 Accept the platform’s official activity entity form and exact selected `#话题` form. Reject plain hashtag residue and duplicates.
 
+Count only committed `[data-mention="#"]` or `[data-mention="activity"]` nodes as selected topics. A matching `#topic` string in editor text is residue, not an entity. When a readable package label contains whitespace, query the compact form (for example `AI Agent` -> `AIAgent`) and compare committed entity names after removing whitespace; retain the readable package label in evidence.
+
 The description may truthfully contain a requested topic word such as `HTML` or `Vercel`. To detect plain topic residue, first remove committed entity nodes and the exact expected description prefix, then inspect only the remaining tail. Do not reject a correct description merely because its prose contains a topic word. An activity entity may render without a literal `#`; `data-mention="activity"` plus the exact visible entity label is valid page evidence.
 
 ## Account Setting
@@ -66,4 +68,4 @@ visible enabled 发布 button
 final publish not clicked
 ```
 
-This path passed fresh 308 MB and 208 MB real draft runs on 2026-07-14, including recovery from an explicit upload failure, exact reconstruction of a previously corrupted rich description, a long Chinese title that initially lost a character, topic words repeated in prose, delayed landscape-cover receipt repair, checkpoint recovery, and repeated no-op verification.
+This path passed fresh 308 MB, 208 MB, 731 MB, and 533 MB real draft runs on 2026-07-14 and 2026-07-15, including interrupted-upload takeover without reinjection, recovery from explicit upload failures, exact reconstruction of corrupted rich descriptions, whitespace-normalized topic lookup, a long Chinese title that initially lost a character, topic words repeated in prose, delayed landscape-cover receipt repair, checkpoint recovery, and repeated no-op verification.

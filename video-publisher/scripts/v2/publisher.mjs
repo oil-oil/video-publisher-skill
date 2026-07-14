@@ -125,6 +125,9 @@ async function main() {
   const jobDir = path.join(args.stateRoot, jobId);
   const store = new JobStore(jobDir, initialState(jobId, identity, args));
   const state = await store.initialize();
+  if (store.lastRecovery) {
+    console.error(`[video-publisher-v2] restored corrupt job state from atomic backup; preserved=${store.lastRecovery.corruptPath}`);
+  }
   if (state.fingerprint !== identity.fingerprint) throw new Error(`Job ${jobId} belongs to another package`);
   for (const platform of args.platforms) state.platforms[platform] ||= { status: "new", taskSpaceId: null, receipts: {}, verdict: null, history: [] };
   for (const platform of args.platforms) {

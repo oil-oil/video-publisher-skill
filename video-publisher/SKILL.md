@@ -63,6 +63,8 @@ Custom-cover dialogs also use the single UI queue. Isolated task spaces do not m
 
 Accepted cover receipts are written to atomic, fingerprint-bound checkpoints inside the job directory before an adapter returns. This closes the crash window between a successful creator-page mutation and the orchestrator recording its result. A resumed run still has to match the checkpoint against fresh page truth.
 
+Job state also keeps a one-generation atomic backup. If `state.json` is invalid JSON, restore only a backup whose package fingerprint matches, preserve the corrupt primary as `state.corrupt-<timestamp>.json`, and then re-inspect every platform. Never turn restored state into `READY` without fresh page verification.
+
 ## Browser Rules
 
 - Use `ego-browser`; do not fall back to Chrome control.
@@ -197,6 +199,8 @@ A ninth cold-start regression used a 1.12 GB, 15:09 HEVC source with custom-cove
 A tenth boundary regression stream-copied exactly 15:00 from that source. ISO BMFF reported 900.010 seconds because of final-packet rounding; the 1.113 GB HEVC file uploaded to Douyin on its first diagnostic attempt and passed exact title, description, five topic entities, settings, platform-default cover, final-button, and safety verification. After adding the 0.1-second tolerance, the production orchestrator repeated the upload in a fresh task space, reached `READY`, and passed three no-op reruns. The preflight therefore allows only 0.1 seconds above 900 for container rounding while still rejecting materially longer content. Every final guard remained armed with zero attempts.
 
 An eleventh four-platform regression used a fresh 94 MB H.264 source and platform-default covers, then terminated the orchestrator during serialized Douyin topic insertion after every upload had completed and Xiaohongshu had reached `READY`. Fresh recovery evidence found the exact Douyin title and body plus exactly two of five committed topics; it reported only `tags` missing. The same job reused all four task-space ids, performed no video upload, rebuilt the Douyin rich editor without duplication, completed Bilibili and WeChat Channels serially, and reached four-platform `READY`. Three additional full reruns were no-op `READY` passes. Every final guard remained armed with zero attempts, and no final publish control was clicked.
+
+A twelfth cold-start regression used a real 45 MB, 27-second, 120fps MOV with two whitespace-bearing topic names and platform-default covers. All four platforms accepted the MOV and reached `READY`; three full reruns were no-op passes. Deliberately corrupting the completed job's `state.json` first reproduced a fatal JSON parse. After adding atomic state backups, a second corruption was preserved as a timestamped artifact, the matching backup restored all four numeric task-space ids, and fresh inspection/verification returned four-platform `READY` with no upload or UI mutation. A further no-op rerun remained `READY`; all final guards stayed armed with zero attempts.
 
 A passing platform-specific diagnostic still does not replace this system-level regression when scheduler, persistence, or shared-browser behavior changes.
 

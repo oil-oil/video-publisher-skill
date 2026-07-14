@@ -113,6 +113,8 @@ A mutation result is not enough. The final `verify` phase must re-read the page 
 
 The production runner also writes accepted cover receipts to an atomic per-job, per-platform checkpoint. On restart, the orchestrator loads only checkpoints whose platform and package fingerprint match the current job, then performs the same fresh page verification. Checkpoints are recovery evidence, not a substitute for `verify`.
 
+Every completed state save keeps the prior valid `state.json` as an atomic one-generation backup. If the primary file is invalid JSON, restore only when the backup fingerprint matches the current package, preserve the corrupt primary with a timestamped filename, and re-run normal inspect/verify. If the backup is missing, invalid, or belongs to another fingerprint, fail closed before browser work.
+
 ## Cover Receipts
 
 When custom covers are enabled, persist a receipt containing:

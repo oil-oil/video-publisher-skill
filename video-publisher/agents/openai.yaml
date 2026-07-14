@@ -1,0 +1,7 @@
+interface:
+  display_name: "Video Publisher"
+  short_description: "带首次配置的 Ego Lite 四平台视频草稿发布"
+  default_prompt: "使用 $video-publisher；若尚未完成配置先进行 onboarding，再按个人默认值将本地视频准备为四个平台的可发布草稿，并停在最终发布按钮前。"
+
+policy:
+  allow_implicit_invocation: true

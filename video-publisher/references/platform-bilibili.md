@@ -22,7 +22,7 @@ targetUploaded: the requested filename/title owns that completed video
 
 Do not equate “target not found” with “no active upload”. This false equivalence previously skipped foreign-draft quarantine.
 
-Both same-target resume and a real foreign-draft save/clean-page flow passed live testing on 2026-07-14.
+Both same-target resume and a real foreign-draft save/clean-page flow passed live testing. A later task-space-loss test recreated the Bilibili space, resumed the same target with no video upload, and repaired only the page state that did not survive the restore.
 
 ## Metadata And Declarations
 
@@ -66,6 +66,8 @@ Upload through the active `.bcc-upload-wrapper` image input. The cover editor’
 On the currently tested editor, a correctly targeted real selector click may still be swallowed by the framework. First attempt the real click. If the same visible `封面制作` dialog and the same enabled `.button.submit` control remain after the settle window, the adapter may invoke that exact scoped control through the page framework once. Record `frameworkFallbackUsed`, then still require the dialog to close and the accepted main-page cover URL to appear. Never broaden this fallback to text search or to any final-publish control.
 
 Read the accepted main cover from `.cover .cover-content .cover-img`. Persist its `archive.biliimg.com` or `biliimg.com` URL as the receipt. The same content-addressed URL may remain when re-uploading the identical file, so proof requires the upload action, enabled completion control, closed editor, and accepted main-page URL together.
+
+A matching checkpoint is only expected identity evidence. If a restored same-target editor does not expose the checkpoint URL on the live main cover, do not mark the cover ready. Re-upload the exact asset, record the new action receipt, and independently verify the main card even when the content-addressed CDN URL is unchanged.
 
 ## Required Gates
 

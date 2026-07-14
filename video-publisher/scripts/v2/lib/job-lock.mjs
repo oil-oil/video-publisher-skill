@@ -4,14 +4,16 @@ import path from "node:path";
 const INVALID_OWNER_GRACE_MS = 5000;
 
 export class JobBusyError extends Error {
-  constructor(jobId, owner = {}) {
+  constructor(jobId, owner = {}, scope = "job") {
     const ownerText = owner.pid
       ? `under PID ${owner.pid}`
       : "by another orchestrator that is still acquiring its lock";
-    super(`Job ${jobId} is already running ${ownerText}; refusing a second orchestrator`);
+    const subject = scope === "publisher" ? "Another video publishing job" : `Job ${jobId}`;
+    super(`${subject} is already running ${ownerText}; refusing a second orchestrator`);
     this.name = "JobBusyError";
     this.jobId = jobId;
     this.owner = owner;
+    this.scope = scope;
   }
 }
 
@@ -41,14 +43,14 @@ function invalidOwnerIsStale(lockPath) {
   }
 }
 
-export function acquireJobLock(jobDir, { jobId, packagePath } = {}) {
+export function acquireJobLock(jobDir, { jobId, packagePath, scope = "job" } = {}) {
   const lockPath = path.join(jobDir, "orchestrator.lock");
   fs.mkdirSync(jobDir, { recursive: true });
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       fs.mkdirSync(lockPath);
-      const owner = { pid: process.pid, jobId, packagePath, acquiredAt: new Date().toISOString() };
+      const owner = { pid: process.pid, scope, jobId, packagePath, acquiredAt: new Date().toISOString() };
       fs.writeFileSync(path.join(lockPath, "owner.json"), JSON.stringify(owner, null, 2));
       let released = false;
       return () => {
@@ -66,7 +68,7 @@ export function acquireJobLock(jobDir, { jobId, packagePath } = {}) {
         fs.rmSync(lockPath, { recursive: true, force: true });
         continue;
       }
-      throw new JobBusyError(jobId || path.basename(jobDir), owner);
+      throw new JobBusyError(jobId || path.basename(jobDir), owner, scope);
     }
   }
   throw new Error(`Could not acquire orchestrator lock for job ${jobId || path.basename(jobDir)}`);

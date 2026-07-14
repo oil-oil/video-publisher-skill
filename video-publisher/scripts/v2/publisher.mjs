@@ -26,7 +26,7 @@ const RIGHTS_PLATFORMS = new Set(["xiaohongshu", "bilibili", "wechat_channels"])
 const validators = { xiaohongshu: validateXiaohongshuPackage, douyin: validateDouyinPackage, bilibili: validateBilibiliPackage, wechat_channels: validateWechatChannelsPackage };
 
 class UsageError extends Error {}
-let releaseActiveJobLock = null;
+const activeLockReleases = [];
 
 function positive(raw, name) {
   const value = Number(raw);
@@ -125,7 +125,12 @@ async function main() {
   const identity = await buildIdentity(pkg);
   const jobId = args.jobId || identity.fingerprint.slice(0, 16);
   const jobDir = path.join(args.stateRoot, jobId);
-  releaseActiveJobLock = acquireJobLock(jobDir, { jobId, packagePath: args.packagePath });
+  activeLockReleases.push(acquireJobLock(path.join(args.stateRoot, ".publisher"), {
+    jobId,
+    packagePath: args.packagePath,
+    scope: "publisher",
+  }));
+  activeLockReleases.push(acquireJobLock(jobDir, { jobId, packagePath: args.packagePath }));
   const store = new JobStore(jobDir, initialState(jobId, identity, args));
   const state = await store.initialize();
   if (store.lastRecovery) {
@@ -266,4 +271,6 @@ main()
     console.error(`[video-publisher-v2] fatal: ${String(error?.stack || error)}`);
     process.exitCode = error instanceof UsageError ? 2 : 1;
   })
-  .finally(() => releaseActiveJobLock?.());
+  .finally(() => {
+    for (const release of activeLockReleases.reverse()) release();
+  });

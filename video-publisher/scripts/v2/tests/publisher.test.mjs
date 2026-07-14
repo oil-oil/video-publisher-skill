@@ -161,3 +161,32 @@ test("two publishers for the same job produce one winner and one immediate refus
   assert.match(refused.stderr,/already running.+refusing a second orchestrator/);
   assert.equal(fs.existsSync(path.join(root,"shared-job","orchestrator.lock")),false);
 });
+
+test("two different jobs under one state root cannot split platform ownership", async () => {
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-global-lock-test-"));
+  const configPath=path.join(root,"config.json");
+  const log=path.join(root,"events.ndjson");
+  await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:1,onboarding:{completed:true},sourceDirectory:root,defaultPlatforms:["xiaohongshu"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:1,uploadConcurrency:1}}));
+  const packagePaths=[];
+  for (const suffix of ["a","b"]) {
+    const videoPath=path.join(root,`sample-${suffix}.mp4`);
+    const packagePath=path.join(root,`package-${suffix}.json`);
+    await fs.promises.writeFile(videoPath,`test video fixture ${suffix}`);
+    await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:`Global lock ${suffix}`,xhsTopics:["Test"],cover:{uploadCustomCover:false}}));
+    packagePaths.push(packagePath);
+  }
+  const options={env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),VIDEO_PUBLISHER_V2_MOCK_LOG:log}};
+  const argsFor=(packagePath,jobId)=>[path.join(V2_DIR,"publisher.mjs"),packagePath,"global-lock","xiaohongshu","--job-id",jobId,"--state-root",root];
+  const results=await Promise.all([
+    run(process.execPath,argsFor(packagePaths[0],"job-a"),options),
+    run(process.execPath,argsFor(packagePaths[1],"job-b"),options),
+  ]);
+  assert.deepEqual(results.map(item=>item.code).sort(),[0,1]);
+  const winner=results.find(item=>item.code===0);
+  const refused=results.find(item=>item.code===1);
+  assert.equal(JSON.parse(winner.stdout).ready,true);
+  assert.match(refused.stderr,/Another video publishing job is already running/);
+  const stateFiles=["job-a","job-b"].filter(jobId=>fs.existsSync(path.join(root,jobId,"state.json")));
+  assert.equal(stateFiles.length,1,"the refused job must not write state");
+  assert.equal(fs.existsSync(path.join(root,".publisher","orchestrator.lock")),false);
+});

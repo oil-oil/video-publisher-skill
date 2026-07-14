@@ -11,6 +11,7 @@ import {
 } from "../lib/content-package.mjs";
 import { defaultConfig, normalizeConfig } from "../lib/config.mjs";
 import {
+  DOUYIN_DURATION_CONTAINER_TOLERANCE_SECONDS,
   DOUYIN_MAX_DURATION_SECONDS,
   inspectMediaFile,
   readIsoBmffDuration,
@@ -127,12 +128,12 @@ test("ISO BMFF duration parser reads mvhd without ffprobe", async () => {
   });
 });
 
-test("Douyin preflight accepts 15:00 and rejects longer media only for Douyin", async () => {
+test("Douyin preflight accepts 15:00 container rounding and rejects longer media only for Douyin", async () => {
   await withTempDir(async root => {
     const acceptedPath = path.join(root, "accepted.mp4");
     const rejectedPath = path.join(root, "rejected.mp4");
-    await fs.promises.writeFile(acceptedPath, mp4WithDuration(DOUYIN_MAX_DURATION_SECONDS));
-    await fs.promises.writeFile(rejectedPath, mp4WithDuration(DOUYIN_MAX_DURATION_SECONDS + 1));
+    await fs.promises.writeFile(acceptedPath, mp4WithDuration(DOUYIN_MAX_DURATION_SECONDS + DOUYIN_DURATION_CONTAINER_TOLERANCE_SECONDS / 2));
+    await fs.promises.writeFile(rejectedPath, mp4WithDuration(DOUYIN_MAX_DURATION_SECONDS + DOUYIN_DURATION_CONTAINER_TOLERANCE_SECONDS + 0.001));
     assert.deepEqual(validateMediaForPlatform({ videoPath: acceptedPath }, "douyin"), []);
     assert.match(validateMediaForPlatform({ videoPath: rejectedPath }, "douyin")[0], /DOUYIN_DURATION_LIMIT/);
     assert.deepEqual(validateMediaForPlatform({ videoPath: rejectedPath }, "xiaohongshu"), []);

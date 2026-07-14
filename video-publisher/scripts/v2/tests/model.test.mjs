@@ -39,6 +39,16 @@ test("typed risk-control blocker wins over otherwise missing gates", () => {
   assert.equal(verdict.blocker.code, BLOCKER.RISK_CONTROL);
 });
 
+test("a broken Ego input channel blocks instead of scheduling a video upload", () => {
+  const verdict = evaluateObservation(observation("douyin", {
+    gates: { video: { ok: false, evidence: { reason: "ego runner unavailable" } } },
+    blocker: { code: BLOCKER.INPUT_CHANNEL_BROKEN, message: "Ego Lite exited", retryable: true },
+  }));
+  assert.equal(verdict.ready, false);
+  assert.equal(verdict.blocker.code, BLOCKER.INPUT_CHANNEL_BROKEN);
+  assert.equal(classifyVerdict(verdict), "blocked");
+});
+
 test("READY rejects a self-reported safety gate without an armed page guard", () => {
   const verdict = evaluateObservation(observation("xiaohongshu", {
     gates: { safety: { ok: true, evidence: { finalPublishClicked: false, guardArmed: false, blockedAttempts: 0 } } },

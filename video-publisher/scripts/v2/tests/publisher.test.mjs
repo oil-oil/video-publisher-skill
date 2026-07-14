@@ -142,6 +142,46 @@ test("publisher isolates a Douyin duration blocker and still prepares eligible p
   assert.deepEqual(new Set(events.map(item=>item.platform)),new Set(["xiaohongshu"]));
 });
 
+test("publisher invalidates receipts and checkpoints when Ego recreates a task space", async () => {
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-task-recreate-test-"));
+  const videoPath=path.join(root,"sample-video.mp4");
+  const packagePath=path.join(root,"package.json");
+  const configPath=path.join(root,"config.json");
+  const jobId="task-recreate-job";
+  await fs.promises.writeFile(videoPath,"test video fixture");
+  await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:1,onboarding:{completed:true},sourceDirectory:root,defaultPlatforms:["xiaohongshu"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:1,uploadConcurrency:1}}));
+  await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Task recreate",xhsTopics:["Test"],cover:{uploadCustomCover:false}}));
+  const args=[path.join(V2_DIR,"publisher.mjs"),packagePath,"task-recreate","xiaohongshu","--job-id",jobId,"--state-root",root];
+  const baseEnv={...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs")};
+  const first=await run(process.execPath,args,{env:baseEnv});
+  assert.equal(first.code,0,`${first.stderr}\n${first.stdout}`);
+  const statePath=path.join(root,jobId,"state.json");
+  const state=JSON.parse(await fs.promises.readFile(statePath,"utf8"));
+  state.platforms.xiaohongshu.receipts.legacyOnly={stale:true};
+  state.platforms.xiaohongshu.receiptTaskSpaceId=11;
+  await fs.promises.writeFile(statePath,JSON.stringify(state,null,2));
+  const checkpointPath=path.join(root,jobId,"checkpoints","xiaohongshu.receipts.json");
+  await fs.promises.writeFile(checkpointPath,JSON.stringify({schemaVersion:2,platform:"xiaohongshu",fingerprint:state.fingerprint,taskSpaceId:11,receipts:{legacyOnly:{stale:true}}}));
+  const second=await run(process.execPath,args,{env:{...baseEnv,VIDEO_PUBLISHER_V2_MOCK_TASK_SPACE_ID:"99"}});
+  assert.equal(second.code,0,`${second.stderr}\n${second.stdout}`);
+  const recovered=JSON.parse(await fs.promises.readFile(statePath,"utf8"));
+  assert.equal(recovered.platforms.xiaohongshu.taskSpaceId,99);
+  assert.equal(recovered.platforms.xiaohongshu.receiptTaskSpaceId,99);
+  assert.equal(recovered.platforms.xiaohongshu.receipts.cover.taskSpaceId,99);
+  assert.equal(recovered.platforms.xiaohongshu.receipts.legacyOnly,undefined);
+  assert.equal(fs.existsSync(checkpointPath),false);
+
+  recovered.platforms.xiaohongshu.receipts.legacyOnly={stale:true};
+  await fs.promises.writeFile(statePath,JSON.stringify(recovered,null,2));
+  await fs.promises.writeFile(checkpointPath,JSON.stringify({schemaVersion:2,platform:"xiaohongshu",fingerprint:recovered.fingerprint,taskSpaceId:99,receipts:{legacyOnly:{stale:true}}}));
+  const recycled=await run(process.execPath,args,{env:{...baseEnv,VIDEO_PUBLISHER_V2_MOCK_TASK_SPACE_ID:"99",VIDEO_PUBLISHER_V2_MOCK_TASK_SPACE_RECREATED:"1"}});
+  assert.equal(recycled.code,0,`${recycled.stderr}\n${recycled.stdout}`);
+  const recycledState=JSON.parse(await fs.promises.readFile(statePath,"utf8"));
+  assert.equal(recycledState.platforms.xiaohongshu.taskSpaceId,99);
+  assert.equal(recycledState.platforms.xiaohongshu.receipts.legacyOnly,undefined,"a recreated space must invalidate receipts even when Ego reuses the same numeric id");
+  assert.equal(fs.existsSync(checkpointPath),false);
+});
+
 test("two publishers for the same job produce one winner and one immediate refusal", async () => {
   const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-double-run-test-"));
   const videoPath=path.join(root,"sample-video.mp4");

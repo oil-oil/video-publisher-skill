@@ -46,7 +46,8 @@ async function inspectDouyin() {
     const loginRequired = /扫码登录|请登录|登录后|安全验证|验证码/.test(text) && !/创作中心|内容管理/.test(text)
     const resumeDialog = /你还有上次未发布的视频|是否继续编辑/.test(text)
     const identityEmpty = !title && !editorText
-    const identityMatches = title === expectedTitle || editorText.includes(expectedDescription) || identityEmpty
+    const knownMisroutedInput = title === String(expectedTitle + expectedDescription).slice(0, 30)
+    const identityMatches = title === expectedTitle || editorText.includes(expectedDescription) || identityEmpty || knownMisroutedInput
     const toutiaoLabel = [...document.querySelectorAll('div,span')]
       .map(el=>({el,text:compact(el.innerText||el.textContent||''),r:el.getBoundingClientRect()}))
       .filter(item=>item.text==='今日头条'&&item.r.width>20&&item.r.height>12)
@@ -68,7 +69,7 @@ async function inspectDouyin() {
     const dialogs=[...document.querySelectorAll('[role="dialog"],.semi-modal,[class*="modal-mask"],[class*="dialog-mask"]')]
       .map(el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return {text:compact(el.innerText||el.textContent||'').slice(0,500),cls:String(el.className||''),w:r.width,h:r.height,display:s.display,visibility:s.visibility,opacity:s.opacity}})
       .filter(item=>item.w>20&&item.h>20&&item.display!=='none'&&item.visibility!=='hidden'&&!/animate-hide|leave-active/.test(item.cls))
-    return {text:text.slice(0,2800),title,editorText,prose,selected,plainResidue,duplicates,tokenCounts,uploadSucceeded,uploading,uploadFailed,loginRequired,resumeDialog,identityMatches,identityEmpty,syncOn,syncFound:Boolean(sync),noSyncChecked,simultaneousChecked,coverUrls,dialogs}
+    return {text:text.slice(0,2800),title,editorText,prose,selected,plainResidue,duplicates,tokenCounts,uploadSucceeded,uploading,uploadFailed,loginRequired,resumeDialog,identityMatches,identityEmpty,knownMisroutedInput,syncOn,syncFound:Boolean(sync),noSyncChecked,simultaneousChecked,coverUrls,dialogs}
   })(${JSON.stringify(douyinTitle)}, ${JSON.stringify(douyinDescription)}, ${JSON.stringify(douyinTopics)})`);
   const buttons = await inspectFinalButtons(/^发布$/);
   const finalButton = buttons.find(button=>button.buttonish) || buttons[0] || null;
@@ -82,7 +83,7 @@ async function inspectDouyin() {
   return {
     gates: {
       authenticated: state.loginRequired ? failedGate({loginRequired:true}) : okGate({url:PLATFORM_URLS.douyin}),
-      draftIdentity: state.identityMatches ? okGate({empty:state.identityEmpty,title:state.title}) : failedGate({foreign:true,title:state.title,editorText:state.editorText}),
+      draftIdentity: state.identityMatches ? okGate({empty:state.identityEmpty,title:state.title,recovery:state.knownMisroutedInput?'known_title_body_input_misroute':null}) : failedGate({foreign:true,title:state.title,editorText:state.editorText}),
       video: state.uploadSucceeded && !state.uploading && !state.uploadFailed ? okGate({stable:true}) : failedGate({uploaded:state.uploadSucceeded,uploading:state.uploading,failed:state.uploadFailed,resumeDialog:state.resumeDialog}),
       title: state.title===douyinTitle ? okGate({expected:douyinTitle,actual:state.title}) : failedGate({expected:douyinTitle,actual:state.title}),
       description: state.prose===douyinDescription ? okGate({expected:douyinDescription,actual:state.prose}) : failedGate({expected:douyinDescription,actual:state.prose,editorText:state.editorText}),
@@ -202,16 +203,17 @@ async function focusDouyinEditorEnd() {
   })()`);
   if(!endpoint.ok)return endpoint;
   try{await click([endpoint.point.x,endpoint.point.y],{label:'focus douyin body end'})}catch(error){return {ok:false,reason:String(error?.message||error)}}
+  const focused=await js(String.raw`(() => {const editor=document.querySelector('#vp2-douyin-editor');if(!editor)return{ok:false,reason:'douyin editor lost before focus confirmation'};editor.focus();const selection=window.getSelection(),range=document.createRange();range.selectNodeContents(editor);range.collapse(false);selection.removeAllRanges();selection.addRange(range);const active=document.activeElement;return{ok:active===editor||editor.contains(active),activeTag:active?.tagName||'',activeId:active?.id||''}})()`);
   await wait(.2);
-  return {ok:true,point:endpoint.point};
+  return focused.ok?{ok:true,point:endpoint.point,focus:focused}:{ok:false,reason:'douyin description editor did not retain focus',evidence:focused};
 }
 
 async function clearAndFillDouyinBody() {
   let located=await locateDouyinEditor();if(!located.ok)return located;
   for(let attempt=0;attempt<3;attempt+=1){
     try{await click([located.point.x,located.point.y],{label:'focus douyin body'})}catch(error){return {ok:false,reason:String(error?.message||error)}}
-    await cdp('Input.dispatchKeyEvent',{type:'keyDown',modifiers:4,key:'a',code:'KeyA',windowsVirtualKeyCode:65});
-    await cdp('Input.dispatchKeyEvent',{type:'keyUp',modifiers:4,key:'a',code:'KeyA',windowsVirtualKeyCode:65});
+    const selected=await js(String.raw`(() => {const editor=document.querySelector('#vp2-douyin-editor');if(!editor)return{ok:false,reason:'douyin editor lost while selecting body'};editor.focus();const selection=window.getSelection(),range=document.createRange();range.selectNodeContents(editor);selection.removeAllRanges();selection.addRange(range);const active=document.activeElement;return{ok:active===editor||editor.contains(active),activeTag:active?.tagName||'',activeId:active?.id||''}})()`);
+    if(!selected.ok)return {ok:false,reason:'douyin description editor did not retain selection focus',evidence:selected};
     await pressKey('Backspace').catch(()=>{});await wait(.7);
     located=await locateDouyinEditor();if(!String(located.text||'').replace(/[\s\u200b]/g,''))break;
   }

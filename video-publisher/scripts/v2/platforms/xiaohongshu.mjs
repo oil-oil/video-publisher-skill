@@ -155,30 +155,44 @@ async function rebuildXhsTopics() {
   if (!cleared.ok) return cleared;
   for (const tag of xhsTopics) {
     const queryTag = String(tag).replace(/\s+/g, '');
-    const focused = await js(String.raw`(() => {
+    const started = await js(String.raw`(() => {
       const editors = [...document.querySelectorAll('[contenteditable="true"], [contenteditable=""]')]
       const editor = editors.find(el => /话题|creator-editor/i.test(String(el.className || ''))) || editors[0]
-      if (!editor) return false
+      if (!editor) return { ok: false, reason: 'xiaohongshu topic editor lost focus' }
+      const topicButton = document.querySelector('button.contentBtn.topic-btn, #topicBtn')
+      if (!topicButton) return { ok: false, reason: 'xiaohongshu native topic button missing' }
+      // The sticky publish footer can visually cover this toolbar near the viewport
+      // bottom, so a real pointer click may land on the footer. Calling the native
+      // Vue click handler still uses the site's own editor command to begin a topic.
+      topicButton.click()
       editor.focus(); const selection = window.getSelection(); const range = document.createRange()
       range.selectNodeContents(editor); range.collapse(false); selection.removeAllRanges(); selection.addRange(range)
-      return true
+      const text = String(editor.innerText || editor.textContent || '')
+      return { ok: document.activeElement === editor && text.trimEnd().endsWith('#'), active: document.activeElement === editor, text }
     })()`);
-    if (!focused) return { ok: false, reason: 'xiaohongshu topic editor lost focus' };
-    await cdp('Input.insertText', { text: `#${queryTag}` });
-    await wait(1.8);
-    const clicked = await js(String.raw`((tag) => {
+    if (!started.ok) return { ...started, reason: started.reason || 'xiaohongshu native topic entry did not start' };
+    await cdp('Input.insertText', { text: queryTag });
+    await wait(1.2);
+    let clicked = null;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      clicked = await js(String.raw`((tag) => {
       const compact = value => String(value || '').replace(/\s+/g, ' ').trim()
-      const tagLower = String(tag).toLowerCase()
+      const normalize = value => String(value || '').replace(/\s+/g, '').toLowerCase()
+      const tagLower = normalize(tag)
       const scopes = [...document.querySelectorAll('#creator-editor-topic-container, [data-tippy-root], .tippy-box, .tippy-content')]
       const rows = scopes.flatMap(scope => [...scope.querySelectorAll('.item, [role="option"], div, li')])
         .map(el => ({ el, text: compact(el.querySelector('.name')?.innerText || el.innerText || el.textContent || ''), rect: el.getBoundingClientRect() }))
         .filter(item => item.rect.width > 20 && item.rect.height > 10 && item.rect.height < 100)
-        .filter(item => ((item.text.toLowerCase().match(/^#[^\s#]+/) || [''])[0]) === '#' + tagLower)
-        .sort((a, b) => a.text.length - b.text.length)
+        .map(item => {const match=item.text.match(/(?:\[话题\]\s*)?#([^\s#]+)/)||item.text.match(/^([^\s#]+)/);return {...item,topic:normalize(match?.[1]||'')}})
+        .filter(item => item.topic === tagLower)
+        .sort((a, b) => (a.rect.width*a.rect.height)-(b.rect.width*b.rect.height) || a.text.length-b.text.length)
       const row = rows[0]
-      if (!row) return { ok: false, reason: 'exact topic suggestion missing', tag }
+      if (!row) return { ok: false, reason: 'exact topic suggestion missing', tag, visible: scopes.flatMap(scope=>[...scope.querySelectorAll('.item,[role="option"],li')]).map(el=>compact(el.innerText||el.textContent||'')).filter(Boolean).slice(0,12) }
       row.el.click(); return { ok: true, text: row.text }
     })(${JSON.stringify(queryTag)})`);
+      if (clicked.ok) break;
+      await wait(0.75);
+    }
     if (!clicked.ok) return clicked;
     await wait(1.2);
     const committed = await js(String.raw`((tag) => [...document.querySelectorAll('[contenteditable] a')]

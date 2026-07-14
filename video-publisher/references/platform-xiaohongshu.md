@@ -19,7 +19,7 @@ Do not mutate metadata until the upload phase has fully completed and every sele
 
 ## Topic Entities
 
-Clear the body editor completely, then add topics one at a time through the real suggestion panel.
+Clear the body editor completely, then add topics one at a time through the real suggestion panel. The sticky final-publish footer can cover the visually exposed toolbar near the viewport bottom, so a pointer click may land on the footer instead of `话题`. Invoke the exact native `button.contentBtn.topic-btn` control through its page handler to make the platform editor insert `#`, explicitly refocus the editor at its end, type only the compact topic query, and select the exact suggestion row. Do not inject `#话题` as one text operation; that can create a suggestion decoration without loading candidates on a cold page.
 
 Spaces terminate Xiaohongshu topic input. When a readable package label contains whitespace, query the compact form (for example `AI Agent` -> `AIAgent`) and accept it only when the committed entity's `data-topic.name`, normalized without whitespace, matches the requested label. Preserve the readable package label in evidence. Never accept compact plain text as a substitute for an entity.
 
@@ -61,4 +61,4 @@ visible enabled 发布 button
 visible enabled `发布笔记` final button; final publish not clicked
 ```
 
-This path passed real draft runs on 2026-07-14 and 2026-07-15. The visible-tab polling path was fault-tested by discarding the receipt and re-uploading the same 3:4 asset. Later 731 MB and 533 MB runs survived orchestrator termination during upload without reinjection, and the 533 MB run verified whitespace-normalized topic lookup plus three no-op full reruns.
+This path passed real draft runs on 2026-07-14 and 2026-07-15. The visible-tab polling path was fault-tested by discarding the receipt and re-uploading the same 3:4 asset. Later 731 MB and 533 MB runs survived orchestrator termination during upload without reinjection, and the 533 MB run verified whitespace-normalized topic lookup plus three no-op full reruns. A later real Ego Lite crash/restart reproduced the cold-page topic-decoration failure; the native-command sequence rebuilt four exact entities, restored the 3:4 receipt, reached four-platform `READY`, and remained no-op `READY` for three full reruns.

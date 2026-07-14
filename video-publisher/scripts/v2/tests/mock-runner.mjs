@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { requiredGates } from "../lib/model.mjs";
 
 const [platform, , phase, , taskSpaceRaw] = process.argv.slice(2);
-const taskSpaceId = Number(taskSpaceRaw) || ({ xiaohongshu: 11, douyin: 12, bilibili: 13, wechat_channels: 14 }[platform]);
+const taskSpaceId = Number(process.env.VIDEO_PUBLISHER_V2_MOCK_TASK_SPACE_ID || taskSpaceRaw) || ({ xiaohongshu: 11, douyin: 12, bilibili: 13, wechat_channels: 14 }[platform]);
 const at = Date.now();
 if (process.env.VIDEO_PUBLISHER_V2_MOCK_LOG) fs.appendFileSync(process.env.VIDEO_PUBLISHER_V2_MOCK_LOG, JSON.stringify({ at, event: "start", platform, phase }) + "\n");
 if (phase === "upload") await new Promise(resolve => setTimeout(resolve, 30));
@@ -22,7 +22,8 @@ const result = {
   observedAt: new Date().toISOString(),
   finalPublishClicked: false,
   gates,
-  ...(phase === "mutate" ? { receipts: { cover: { mock: true } } } : {}),
+  ...(process.env.VIDEO_PUBLISHER_V2_MOCK_TASK_SPACE_RECREATED === "1" ? { taskSpaceRecovery: { recreated: true, previousTaskSpaceId: taskSpaceId, taskSpaceId } } : {}),
+  ...(phase === "mutate" ? { receipts: { cover: { mock: true, taskSpaceId } } } : {}),
 };
 if (process.env.VIDEO_PUBLISHER_V2_MOCK_LOG) fs.appendFileSync(process.env.VIDEO_PUBLISHER_V2_MOCK_LOG, JSON.stringify({ at: Date.now(), event: "end", platform, phase }) + "\n");
 console.log("VIDEO_PUBLISHER_V2_RESULT:" + JSON.stringify(result));

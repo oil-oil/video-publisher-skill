@@ -20,6 +20,13 @@ test("job store restores only matching receipt checkpoints", async () => {
   assert.deepEqual(await store.loadReceiptCheckpoint("douyin", "matching-fingerprint"), checkpoint);
   assert.equal(await store.loadReceiptCheckpoint("douyin", "another-package"), null);
   assert.equal(await store.loadReceiptCheckpoint("bilibili", "matching-fingerprint"), null);
+
+  const taskBound = { ...checkpoint, schemaVersion: 2, taskSpaceId: 42 };
+  await fs.promises.writeFile(store.receiptCheckpointPath("douyin"), JSON.stringify(taskBound));
+  assert.deepEqual(await store.loadReceiptCheckpoint("douyin", "matching-fingerprint", 42), taskBound);
+  assert.equal(await store.loadReceiptCheckpoint("douyin", "matching-fingerprint", 43), null);
+  await store.clearReceiptCheckpoint("douyin");
+  assert.equal(fs.existsSync(store.receiptCheckpointPath("douyin")), false);
 });
 
 test("job store restores a corrupt primary from its atomic backup", async () => {

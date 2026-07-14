@@ -139,8 +139,17 @@ async function main() {
   if (state.fingerprint !== identity.fingerprint) throw new Error(`Job ${jobId} belongs to another package`);
   for (const platform of args.platforms) state.platforms[platform] ||= { status: "new", taskSpaceId: null, receipts: {}, verdict: null, history: [] };
   for (const platform of args.platforms) {
-    const checkpoint = await store.loadReceiptCheckpoint(platform, state.fingerprint);
-    if (checkpoint) state.platforms[platform].receipts = { ...checkpoint.receipts, ...(state.platforms[platform].receipts || {}) };
+    const item = state.platforms[platform];
+    if (item.receiptTaskSpaceId != null && item.taskSpaceId != null && Number(item.receiptTaskSpaceId) !== Number(item.taskSpaceId)) {
+      item.receipts = {};
+      item.receiptTaskSpaceId = null;
+      await store.clearReceiptCheckpoint(platform);
+    }
+    const checkpoint = await store.loadReceiptCheckpoint(platform, state.fingerprint, item.taskSpaceId);
+    if (checkpoint) {
+      item.receipts = { ...checkpoint.receipts, ...(item.receipts || {}) };
+      item.receiptTaskSpaceId = checkpoint.taskSpaceId ?? item.receiptTaskSpaceId ?? item.taskSpaceId ?? null;
+    }
   }
   for (const platform of args.platforms.filter(key => preflightErrors[key].length > 0)) {
     const item = state.platforms[platform];
@@ -173,6 +182,7 @@ async function main() {
   const runnerPath = path.resolve(process.env.VIDEO_PUBLISHER_V2_RUNNER || path.join(DIR, "run-platform.mjs"));
   async function invoke(platform, phase) {
     const item = state.platforms[platform];
+    const previousTaskSpaceId = item.taskSpaceId;
     const runnerArgs = [runnerPath, platform, args.packagePath, phase, `${args.taskSuffix}-${jobId}`, item.taskSpaceId ? String(item.taskSpaceId) : ""];
     if (args.originalRightsConfirmed) runnerArgs.push("--confirm-original-rights");
     const execution = await runCapture(process.execPath, runnerArgs, {
@@ -184,7 +194,26 @@ async function main() {
       },
     });
     const observation = parseV2Result(`${execution.stdout}\n${execution.stderr}`);
-    if (observation.receipts) item.receipts = { ...(item.receipts || {}), ...observation.receipts };
+    const taskSpaceChanged = previousTaskSpaceId != null && observation.taskSpaceId != null
+      && Number(previousTaskSpaceId) !== Number(observation.taskSpaceId);
+    const taskSpaceRecreated = observation.taskSpaceRecovery?.recreated === true;
+    if (taskSpaceChanged || taskSpaceRecreated) {
+      item.receipts = {};
+      item.receiptTaskSpaceId = null;
+      await store.clearReceiptCheckpoint(platform);
+      observation.recovery = {
+        ...(observation.recovery || {}),
+        taskSpaceRecreated: {
+          previousTaskSpaceId: observation.taskSpaceRecovery?.previousTaskSpaceId ?? previousTaskSpaceId,
+          taskSpaceId: observation.taskSpaceId,
+          numericIdChanged: taskSpaceChanged,
+        },
+      };
+    }
+    if (observation.receipts) {
+      item.receipts = { ...(item.receipts || {}), ...observation.receipts };
+      item.receiptTaskSpaceId = observation.taskSpaceId ?? item.taskSpaceId ?? null;
+    }
     const verdict = evaluateObservation(observation);
     item.status = classifyVerdict(verdict);
     if (observation.blocker) item.status = verdict.blocker?.requiresUser ? "blocked_user" : "blocked";

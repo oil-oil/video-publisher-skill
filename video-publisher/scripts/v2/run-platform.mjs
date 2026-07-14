@@ -11,7 +11,7 @@ import {
   validateXiaohongshuPackage,
 } from "../lib/content-package.mjs";
 import { loadConfig } from "../lib/config.mjs";
-import { PLATFORMS } from "./lib/model.mjs";
+import { PLATFORMS, requiredGates } from "./lib/model.mjs";
 import { acquirePlatformLock } from "./lib/platform-lock.mjs";
 import { parseV2Result, V2_RESULT_PREFIX } from "./lib/result-line.mjs";
 
@@ -35,7 +35,7 @@ function usage() {
 
 function runEgo(script) {
   return new Promise((resolve, reject) => {
-    const child = spawn("ego-browser", ["nodejs"], { stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(process.env.VIDEO_PUBLISHER_V2_EGO_COMMAND || "ego-browser", ["nodejs"], { stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", chunk => { stdout += chunk; });
@@ -99,7 +99,11 @@ const fragments = [
 const releasePlatformLock = acquirePlatformLock(platform, phase);
 let execution;
 try {
-  execution = await runEgo(fragments);
+  try {
+    execution = await runEgo(fragments);
+  } catch (error) {
+    execution = { code: 1, stdout: "", stderr: String(error?.stack || error) };
+  }
 } finally {
   releasePlatformLock();
 }
@@ -108,7 +112,30 @@ let result;
 try {
   result = parseV2Result(combined, "Ego runner");
 } catch (error) {
-  console.error(combined.trim());
-  throw error;
+  const detail = combined.trim().slice(-1600);
+  const userControl = /user is controlling|user controls|用户.*控制|not assigned to an agent|task space.*inactive/i.test(detail);
+  if (execution.code === 0 && detail) {
+    console.error(detail);
+    throw error;
+  }
+  const failureEvidence = { reason: "ego runner unavailable", exitCode: execution.code, detail };
+  const gates = Object.fromEntries(requiredGates(platform).map(name => [name, { ok: false, evidence: failureEvidence }]));
+  gates.safety = { ok: false, evidence: { finalPublishClicked: false, guardArmed: false, blockedAttempts: 0 } };
+  result = {
+    schemaVersion: 1,
+    platform,
+    phase,
+    taskSpaceId: Number(taskSpaceRef) || null,
+    observedAt: new Date().toISOString(),
+    finalPublishClicked: false,
+    gates,
+    blocker: {
+      code: userControl ? "USER_CONTROL" : "INPUT_CHANNEL_BROKEN",
+      message: userControl ? "Ego Lite 任务空间已由用户接管" : "Ego Lite 已退出或无法返回页面证据",
+      retryable: !userControl,
+      requiresUser: userControl,
+      evidence: failureEvidence,
+    },
+  };
 }
 console.log(V2_RESULT_PREFIX + JSON.stringify(result));

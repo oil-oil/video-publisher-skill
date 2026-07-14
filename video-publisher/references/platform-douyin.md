@@ -18,6 +18,8 @@ Clear the rich description editor with a real click inside the editor followed b
 
 For the native title input, use real focus, the input element's verified full-range selection, real Backspace, and one CDP `Input.insertText` call. Do not type a Chinese title character by character, and do not append unless the field has been freshly proven empty. Retry the bounded clear-and-insert sequence only when the exact value does not persist.
 
+After a browser restart, refocus the rich description editor and verify `document.activeElement` immediately before every body insertion. One real crash reproduced a lost-focus write where `(expected title + expected description).slice(0, 30)` landed in the title field. Treat only that exact deterministic value as the known title/body input misroute and repair it with the normal verified title/body sequence. Any other unexpected title remains a foreign-draft blocker.
+
 ## Topic Entities
 
 For each topic:

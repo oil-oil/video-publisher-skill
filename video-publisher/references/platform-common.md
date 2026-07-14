@@ -115,7 +115,7 @@ safety
 
 A mutation result is not enough. The final `verify` phase must re-read the page and match stored cover receipts.
 
-The production runner also writes accepted cover receipts to an atomic per-job, per-platform checkpoint. On restart, the orchestrator loads only checkpoints whose platform and package fingerprint match the current job, then performs the same fresh page verification. Checkpoints are recovery evidence, not a substitute for `verify`.
+The production runner also writes accepted cover receipts to an atomic per-job, per-platform schema-`2` checkpoint. Each checkpoint is bound to its platform, package fingerprint, and numeric task-space id. On restart, the orchestrator loads only exact matches, then performs the same fresh page verification. If Ego explicitly recreates a task space, clear both state receipts and the checkpoint even when the replacement recycles the same numeric id. Checkpoints are recovery evidence, not a substitute for `verify`.
 
 Every completed state save keeps the prior valid `state.json` as an atomic one-generation backup. If the primary file is invalid JSON, restore only when the backup fingerprint matches the current package, preserve the corrupt primary with a timestamped filename, and re-run normal inspect/verify. If the backup is missing, invalid, or belongs to another fingerprint, fail closed before browser work.
 
@@ -180,3 +180,5 @@ On 2026-07-15, a later regression terminated the orchestrator during serialized 
 Another 2026-07-15 regression proved that per-job locks were insufficient for two different jobs: simultaneous runs split platform ownership and one state was left `running`. The state-root publisher lock now rejects one contender before state/browser work while preserving the owner's four-platform parallel phases. The refused real job's prior `READY` state remained byte-identical, and both normal release and dead-PID global-lock recovery passed live testing.
 
 A real process-group `SIGKILL` during four parallel uploads subsequently left all three lock levels plus job state behind. The ordinary same-job retry removed only locks whose PIDs were dead, reused all four numeric task spaces, and received `resume_existing` from every upload adapter. It completed all custom-cover and metadata gates, reached four-platform `READY`, and stayed no-op `READY` for three reruns.
+
+A later Ego Lite process-group crash proved a separate failure boundary. A missing structured browser result is now converted into retryable `INPUT_CHANNEL_BROKEN` evidence with every required gate false, never into upload work or a fatal parse exception. After restart, the explicit task-space recreation signal invalidates stale receipts independently of numeric-id equality. The real recovery rebuilt only lost browser state, reached four-platform `READY`, and passed three further no-op reruns with every final guard armed and zero attempts.

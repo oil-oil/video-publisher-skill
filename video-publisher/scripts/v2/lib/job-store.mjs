@@ -1,21 +1,60 @@
 import fs from "node:fs";
 import path from "node:path";
 
+function validState(value) {
+  return value && typeof value === "object" && !Array.isArray(value);
+}
+
+async function readState(filePath) {
+  const parsed = JSON.parse(await fs.promises.readFile(filePath, "utf8"));
+  if (!validState(parsed)) throw new Error(`Job state is not a JSON object: ${filePath}`);
+  return parsed;
+}
+
 export class JobStore {
   constructor(jobDir, initialState) {
     this.jobDir = jobDir;
     this.statePath = path.join(jobDir, "state.json");
+    this.backupPath = path.join(jobDir, "state.backup.json");
     this.evidenceDir = path.join(jobDir, "evidence");
     this.checkpointDir = path.join(jobDir, "checkpoints");
     this.state = initialState;
     this.sequence = 0;
     this.queue = Promise.resolve();
+    this.lastRecovery = null;
   }
 
   async initialize() {
     await fs.promises.mkdir(this.evidenceDir, { recursive: true });
     await fs.promises.mkdir(this.checkpointDir, { recursive: true });
-    if (fs.existsSync(this.statePath)) this.state = JSON.parse(await fs.promises.readFile(this.statePath, "utf8"));
+    const expectedFingerprint = this.state?.fingerprint || null;
+    if (fs.existsSync(this.statePath)) {
+      try {
+        this.state = await readState(this.statePath);
+      } catch (primaryError) {
+        let backup;
+        try {
+          backup = await readState(this.backupPath);
+        } catch (backupError) {
+          throw new Error(
+            `Job state is corrupted and no valid atomic backup is available: ${this.statePath}; `
+            + `primary=${String(primaryError?.message || primaryError)}; backup=${String(backupError?.message || backupError)}`,
+          );
+        }
+        if (expectedFingerprint && backup.fingerprint !== expectedFingerprint) {
+          throw new Error(`Job state backup belongs to another package: ${this.backupPath}`);
+        }
+        const recoveredAt = new Date().toISOString();
+        const stamp = recoveredAt.replace(/[:.]/g, "-");
+        const corruptPath = path.join(this.jobDir, `state.corrupt-${stamp}.json`);
+        await fs.promises.rename(this.statePath, corruptPath);
+        this.state = backup;
+        this.state.recoveryEvents ||= [];
+        this.state.recoveryEvents.push({ recoveredAt, backupPath: this.backupPath, corruptPath });
+        if (this.state.recoveryEvents.length > 20) this.state.recoveryEvents = this.state.recoveryEvents.slice(-20);
+        this.lastRecovery = { recoveredAt, backupPath: this.backupPath, corruptPath };
+      }
+    }
     await this.save();
     return this.state;
   }
@@ -40,9 +79,22 @@ export class JobStore {
     this.state.updatedAt = new Date().toISOString();
     const body = JSON.stringify(this.state, null, 2) + "\n";
     const temp = `${this.statePath}.${process.pid}.${++this.sequence}.tmp`;
+    const backupTemp = `${this.backupPath}.${process.pid}.${this.sequence}.tmp`;
     this.queue = this.queue.then(async () => {
-      await fs.promises.writeFile(temp, body);
-      await fs.promises.rename(temp, this.statePath);
+      try {
+        await fs.promises.writeFile(temp, body);
+        if (fs.existsSync(this.statePath)) {
+          await fs.promises.copyFile(this.statePath, backupTemp);
+          await fs.promises.rename(backupTemp, this.backupPath);
+        }
+        await fs.promises.rename(temp, this.statePath);
+      } catch (error) {
+        await Promise.allSettled([
+          fs.promises.rm(temp, { force: true }),
+          fs.promises.rm(backupTemp, { force: true }),
+        ]);
+        throw error;
+      }
     });
     return this.queue;
   }

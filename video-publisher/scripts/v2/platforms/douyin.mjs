@@ -37,7 +37,9 @@ async function inspectDouyin() {
     let proseRaw=String(clone?.innerText||clone?.textContent||'').replace(/\u200b/g,' ')
     for(const tag of requestedTopics)proseRaw=proseRaw.replace(new RegExp('(?:^|\\s)#'+escapeRegExp(tag)+'(?=$|\\s)','gi'),' ')
     const prose = compact(proseRaw)
-    const plainResidue = requestedTopics.filter(tag=>new RegExp('(?:^|\\s)'+escapeRegExp(tag)+'(?=$|\\s)','i').test(prose))
+    const expectedProse = compact(expectedDescription)
+    const residueTail = expectedProse && prose.startsWith(expectedProse) ? prose.slice(expectedProse.length).trim() : prose
+    const plainResidue = requestedTopics.filter(tag=>new RegExp('(?:^|\\s)'+escapeRegExp(tag)+'(?=$|\\s)','i').test(residueTail))
     const uploadSucceeded = /上传成功|重新上传/.test(text) && /作品描述|基础信息/.test(text)
     const uploading = /上传过程中|取消上传|上传剩余时间|已上传：|上传速度|当前速度/.test(text) && !/上传成功/.test(text)
     const uploadFailed = /上传失败|网络错误|重新上传失败/.test(text)
@@ -142,10 +144,23 @@ async function setDouyinTitle() {
   const selector='input[placeholder*="作品标题"]';
   const before=await js(String.raw`((selector) => {const el=document.querySelector(selector);if(!el)return null;el.scrollIntoView({block:'center',inline:'center'});return el.value})(${JSON.stringify(selector)})`);
   if(before===null)return {ok:false,reason:'douyin title input missing'};
-  try{await fillInput(selector,douyinTitle)}catch(error){return {ok:false,reason:String(error?.message||error)}}
-  await js(String.raw`((selector) => {document.querySelector(selector)?.blur();return true})(${JSON.stringify(selector)})`);await wait(1);
-  const after=await js(String.raw`((selector) => document.querySelector(selector)?.value||'')(${JSON.stringify(selector)})`);
-  return after===douyinTitle?{ok:true,before,value:after}:{ok:false,reason:'douyin title input did not persist exact value',expected:douyinTitle,actual:after};
+  let after=before;
+  for(let attempt=1;attempt<=3&&after!==douyinTitle;attempt+=1){
+    const exposed=await js(String.raw`((selector) => {const el=document.querySelector(selector);if(!el)return {ok:false};el.id='vp2-douyin-title';el.scrollIntoView({block:'center',inline:'center'});return {ok:true,selector:'#vp2-douyin-title'}})(${JSON.stringify(selector)})`);
+    if(!exposed.ok)return {ok:false,reason:'douyin title input missing during retry'};
+    try{await click(exposed.selector,{label:'focus douyin title'})}catch(error){return {ok:false,reason:String(error?.message||error)}}
+    const selected=await js(String.raw`((selector) => {const el=document.querySelector(selector);if(!el)return {ok:false};el.focus();el.select();return {ok:el.selectionStart===0&&el.selectionEnd===el.value.length,start:el.selectionStart,end:el.selectionEnd,length:el.value.length}})(${JSON.stringify(selector)})`);
+    if(!selected.ok)continue;
+    await pressKey('Backspace').catch(()=>{});
+    await wait(.25);
+    const cleared=await js(String.raw`((selector) => (document.querySelector(selector)?.value||'')==='')(${JSON.stringify(selector)})`);
+    if(!cleared)continue;
+    await cdp('Input.insertText',{text:douyinTitle});
+    await wait(.5);
+    await js(String.raw`((selector) => {document.querySelector(selector)?.blur();return true})(${JSON.stringify(selector)})`);await wait(.7);
+    after=await js(String.raw`((selector) => document.querySelector(selector)?.value||'')(${JSON.stringify(selector)})`);
+  }
+  return after===douyinTitle?{ok:true,before,value:after}:{ok:false,reason:'douyin title input did not persist exact value after bounded retries',expected:douyinTitle,actual:after};
 }
 
 async function locateDouyinEditor() {
@@ -227,11 +242,20 @@ async function repairDelayedDouyinCoverReceipt(){
   if(!prior?.slots?.portrait||!prior?.slots?.landscape)return {ok:false,skipped:true};
   const expected=Object.fromEntries(douyinCoverAssets.map(asset=>[asset.slot,asset]));
   if(!['portrait','landscape'].every(slot=>prior.slots[slot].assetPath===expected[slot].path&&prior.slots[slot].ratio===expected[slot].ratio))return {ok:false,skipped:true};
-  if(prior.slots.portrait.afterUrl!==prior.slots.landscape.afterUrl)return {ok:false,skipped:true};
   const state=await inspectDouyin();const urls=state.gates.cover.evidence?.urls||{};
-  const portrait=(urls.portrait||[]).find(Boolean);const landscape=(urls.landscape||[]).find(url=>url&&url!==portrait);
-  if(!portrait||!landscape||!(urls.portrait||[]).includes(prior.slots.portrait.afterUrl))return {ok:false,skipped:true};
-  const receipt={slots:{portrait:{...prior.slots.portrait,afterUrl:portrait},landscape:{...prior.slots.landscape,afterUrl:landscape}}};
+  const live={
+    portrait:(urls.portrait||[]).find(url=>url&&!(urls.landscape||[]).includes(url)),
+    landscape:(urls.landscape||[]).find(url=>url&&!(urls.portrait||[]).includes(url)),
+  };
+  if(!live.portrait||!live.landscape)return {ok:false,skipped:true};
+  const mirroredCapture=prior.slots.portrait.afterUrl===prior.slots.landscape.afterUrl&&(urls.portrait||[]).includes(prior.slots.portrait.afterUrl);
+  for(const slot of ['portrait','landscape']){
+    const item=prior.slots[slot];
+    if(live[slot]===item.afterUrl)continue;
+    const capturedStale=(item.beforeUrls||[]).includes(item.afterUrl)&&!(item.beforeUrls||[]).includes(live[slot]);
+    if(!(capturedStale||(slot==='landscape'&&mirroredCapture)))return {ok:false,skipped:true};
+  }
+  const receipt={slots:{portrait:{...prior.slots.portrait,afterUrl:live.portrait},landscape:{...prior.slots.landscape,afterUrl:live.landscape}}};
   return {ok:true,receipt,reason:'repaired delayed landscape card after both real slot uploads'};
 }
 

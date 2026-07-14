@@ -180,6 +180,8 @@ The onboarded `all_videos_original` policy also passed real mutation without `--
 
 A second cold-start regression used a different 308 MB source video and four fresh task spaces. Bilibili quarantined a real foreign draft before upload. Douyin recovered from a visible upload failure with bounded reinjection, then rebuilt a corrupted rich description into the exact body plus five topic entities. Bilibili closed a framework-swallowed cover dialog through its exact scoped completion control. Both platforms wrote fingerprint-bound cover checkpoints. After the main-state receipts were deliberately removed, the next full run restored them from those checkpoints and all four platforms returned `READY` without upload or mutation. Three additional consecutive full reruns were also no-op `READY` passes. No final publish control was clicked.
 
+A third cold-start regression used another 208 MB source, a longer Chinese title, prose that repeated two requested topic words, a platform activity entity without a literal `#`, and different cover assets. It exposed and repaired native-title character loss, false plain-topic residue, and a delayed Douyin landscape-card URL. The repaired job reached four-platform `READY`, passed three consecutive no-op full reruns, then restored a deliberately removed Douyin state receipt from its fingerprint-bound checkpoint without mutation. No final publish control was clicked.
+
 A passing platform-specific diagnostic still does not replace this system-level regression when scheduler, persistence, or shared-browser behavior changes.
 
 Real creator-page evidence is the acceptance gate for adapter changes. Unit tests validate orchestration and parsing, not live selectors.

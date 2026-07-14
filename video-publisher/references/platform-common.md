@@ -6,7 +6,7 @@ Read this file and the exact platform reference before changing a live adapter.
 
 One orchestrator owns all platform task spaces. Do not use sub Agents for live creator-page control.
 
-Acquire the job-directory `orchestrator.lock` before reading or writing job state or starting a platform phase. A second process for the same job must fail immediately instead of splitting platform locks with the first process. Remove the lock on every normal exit; after a crash, remove it only when its recorded PID is no longer alive. A fresh lock whose owner file is still being written remains busy.
+Before reading or writing job state or starting a platform phase, acquire the state-root `.publisher/orchestrator.lock` and then the job-directory `orchestrator.lock`. The state-root lock allows only one video job to control the shared creator accounts; the job lock additionally protects one persisted job. A second process must fail immediately instead of splitting platform locks with the owner. Remove both locks on every normal exit; after a crash, remove a lock only when its recorded PID is no longer alive. A fresh lock whose owner file is still being written remains busy.
 
 Never click a final `发布`, `发布笔记`, `发表`, or `立即投稿` button without explicit authorization in the current run. Every adapter result must leave `finalPublishClicked: false`. The shared core installs a capture-phase click/submit guard; safety passes only when `guardArmed: true` and `blockedAttempts: 0` are observed from the live page.
 
@@ -31,7 +31,7 @@ Before step 1, validate the exact local media for every selected platform. The s
 
 The maintained adapter runner also takes an atomic per-platform filesystem lock. A second process targeting the same platform fails before opening Ego instead of overlapping with an active upload, mutation, inspection, or verification. Stale locks from dead processes are removed automatically. This still permits the intended four-platform parallel upload/check phases.
 
-The job lock and platform locks solve different races: the first serializes one persisted job, while the latter prevents two different jobs from controlling the same platform simultaneously.
+The three lock levels solve different races: the state-root publisher lock serializes video jobs that share creator accounts, the job lock protects one persisted job, and platform locks prevent accidental same-platform overlap as defense in depth. Four-platform upload/check parallelism remains available inside the one owning video job.
 
 ## Platform Phases
 
@@ -176,3 +176,5 @@ Unit tests may prove scheduler barriers, persistence, and gate evaluation. Only 
 On 2026-07-14, the production scheduler passed a real four-platform run with four parallel uploads, serialized mutation, persisted task-space/cover state, interruption recovery, and four parallel fresh verifiers all `READY` before the final publish controls.
 
 On 2026-07-15, a later regression terminated the orchestrator during serialized Douyin topic insertion after every video upload had completed. Recovery found the exact title/body and two of five real topic entities, performed no video upload, safely rebuilt the partial rich editor, completed the remaining platforms, and reached four-platform `READY` plus three no-op reruns.
+
+Another 2026-07-15 regression proved that per-job locks were insufficient for two different jobs: simultaneous runs split platform ownership and one state was left `running`. The state-root publisher lock now rejects one contender before state/browser work while preserving the owner's four-platform parallel phases. The refused real job's prior `READY` state remained byte-identical, and both normal release and dead-PID global-lock recovery passed live testing.

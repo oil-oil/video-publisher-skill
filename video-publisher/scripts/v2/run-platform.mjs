@@ -80,7 +80,7 @@ const header = [
   'import path from "node:path";',
   `const platform = ${JSON.stringify(platform)};`,
   `const phase = ${JSON.stringify(phase)};`,
-  `const taskName = ${JSON.stringify(`video publisher v2 ${platform} ${taskSuffix}`)};`,
+  `const taskName = ${JSON.stringify(process.env.VIDEO_PUBLISHER_V2_TASK_NAME || `video publisher v2 ${platform} ${taskSuffix}`)};`,
   `const taskSpaceRef = ${JSON.stringify(taskSpaceRef)};`,
   `const packagePath = ${JSON.stringify(packagePath)};`,
   `const pkg = ${JSON.stringify(pkg)};`,

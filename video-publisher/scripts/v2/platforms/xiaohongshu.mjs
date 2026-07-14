@@ -141,19 +141,23 @@ async function uploadXiaohongshu() {
 }
 
 async function rebuildXhsTopics() {
-  const cleared = await js(String.raw`(() => {
-    const editors = [...document.querySelectorAll('[contenteditable="true"], [contenteditable=""]')]
-    const editor = editors.find(el => el.querySelector('a') || /话题|creator-editor/i.test(String(el.className || ''))) || editors[0]
-    if (!editor) return { ok: false, reason: 'xiaohongshu topic editor missing' }
-    editor.focus()
-    const selection = window.getSelection(); const range = document.createRange()
-    range.selectNodeContents(editor); selection.removeAllRanges(); selection.addRange(range)
-    document.execCommand('delete', false)
-    editor.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'deleteContentBackward' }))
-    return { ok: String(editor.innerText || editor.textContent || '').replace(/\s+/g, ' ').trim() === '' }
-  })()`);
-  if (!cleared.ok) return cleared;
-  for (const tag of xhsTopics) {
+  const attempts=[];
+  for(let rebuildAttempt=1;rebuildAttempt<=3;rebuildAttempt+=1){
+    const cleared = await js(String.raw`(() => {
+      const editors = [...document.querySelectorAll('[contenteditable="true"], [contenteditable=""]')]
+      const editor = editors.find(el => el.querySelector('a') || /话题|creator-editor/i.test(String(el.className || ''))) || editors[0]
+      if (!editor) return { ok: false, reason: 'xiaohongshu topic editor missing' }
+      editor.focus()
+      const selection = window.getSelection(); const range = document.createRange()
+      range.selectNodeContents(editor); selection.removeAllRanges(); selection.addRange(range)
+      document.execCommand('delete', false)
+      editor.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'deleteContentBackward' }))
+      return { ok: String(editor.innerText || editor.textContent || '').replace(/[\s\u200b]/g, '') === '' }
+    })()`);
+    if (!cleared.ok) return {...cleared,attempts};
+    if(rebuildAttempt>1)await wait(1.5*rebuildAttempt);
+    let failure=null;
+    for (const tag of xhsTopics) {
     const queryTag = String(tag).replace(/\s+/g, '');
     const started = await js(String.raw`(() => {
       const editors = [...document.querySelectorAll('[contenteditable="true"], [contenteditable=""]')]
@@ -170,11 +174,13 @@ async function rebuildXhsTopics() {
       const text = String(editor.innerText || editor.textContent || '')
       return { ok: document.activeElement === editor && text.trimEnd().endsWith('#'), active: document.activeElement === editor, text }
     })()`);
-    if (!started.ok) return { ...started, reason: started.reason || 'xiaohongshu native topic entry did not start' };
+    if (!started.ok) { failure={ ...started, reason: started.reason || 'xiaohongshu native topic entry did not start',tag }; break; }
     await cdp('Input.insertText', { text: queryTag });
     await wait(1.2);
+    const typed=await js(String.raw`((tag) => {const editors=[...document.querySelectorAll('[contenteditable="true"],[contenteditable=""]')];const editor=editors.find(el=>/话题|creator-editor/i.test(String(el.className||'')))||editors[0];const text=String(editor?.innerText||editor?.textContent||'').replace(/\u200b/g,'').trimEnd();return {ok:text.replace(/\s+/g,'').toLowerCase().endsWith(('#'+String(tag)).toLowerCase()),text}})(${JSON.stringify(queryTag)})`);
+    if(!typed.ok){failure={ok:false,reason:'xiaohongshu topic query did not persist exactly',tag,typed};break;}
     let clicked = null;
-    for (let attempt = 0; attempt < 8; attempt += 1) {
+    for (let attempt = 0; attempt < 12; attempt += 1) {
       clicked = await js(String.raw`((tag) => {
       const compact = value => String(value || '').replace(/\s+/g, ' ').trim()
       const normalize = value => String(value || '').replace(/\s+/g, '').toLowerCase()
@@ -193,14 +199,23 @@ async function rebuildXhsTopics() {
       if (clicked.ok) break;
       await wait(0.75);
     }
-    if (!clicked.ok) return clicked;
+    if (!clicked.ok) { failure={...clicked,tag}; break; }
     await wait(1.2);
     const committed = await js(String.raw`((tag) => [...document.querySelectorAll('[contenteditable] a')]
       .some(el => {let name='';try{name=JSON.parse(el.getAttribute('data-topic')||'{}').name||''}catch{};if(!name)name=String(el.innerText||el.textContent||'').replace(/^#|\[话题\]#.*$/g,'');return name.replace(/\s+/g,'').toLowerCase()===String(tag).replace(/\s+/g,'').toLowerCase()}))(${JSON.stringify(tag)})`);
-    if (!committed) return { ok: false, reason: 'topic entity did not commit', tag };
+    if (!committed) { failure={ ok: false, reason: 'topic entity did not commit', tag }; break; }
     await cdp('Input.insertText', { text: ' ' });
+    }
+    if(!failure){
+      const verified=await inspectXiaohongshu();
+      if(verified.gates.tags.ok)return {ok:true,rebuildAttempt,attempts:[...attempts,{rebuildAttempt,result:'committed'}]};
+      failure={ok:false,reason:'xiaohongshu topic entities did not pass exact post-build verification',evidence:verified.gates.tags.evidence};
+    }
+    attempts.push({rebuildAttempt,...failure});
+    if(rebuildAttempt<3)await wait(2*rebuildAttempt);
   }
-  return { ok: true };
+  const last=attempts.at(-1)||{};
+  return {ok:false,reason:'xiaohongshu exact topics did not commit after bounded whole-set rebuilds',lastFailure:last,attempts};
 }
 
 async function ensureXhsOriginal() {

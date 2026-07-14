@@ -222,20 +222,101 @@ async function clearAndFillDouyinBody() {
   const after=await locateDouyinEditor();const ok=String(after.text||'').replace(/[\s\u200b]/g,'')===String(douyinDescription||'').replace(/[\s\u200b]/g,'');return ok?{ok:true,text:after.text}:{ok:false,reason:'douyin description did not persist exact value',expected:douyinDescription,actual:after.text};
 }
 
+const normalizeDouyinTopic = value => String(value || '').replace(/^#/, '').replace(/\s+/g, '').toLowerCase();
+
+async function inspectDouyinTrailingPlainText() {
+  await locateDouyinEditor();
+  return await js(String.raw`(() => {
+    const editor=document.querySelector('#vp2-douyin-editor');if(!editor)return {ok:false,reason:'douyin editor missing during tail inspection'}
+    const walker=document.createTreeWalker(editor,NodeFilter.SHOW_TEXT);let node,lastPlain=null
+    while((node=walker.nextNode())){if(!node.parentElement?.closest('[data-mention], [contenteditable="false"]')&&String(node.nodeValue||'').replace(/\u200b/g,'').length)lastPlain=node}
+    const value=String(lastPlain?.nodeValue||'').replace(/\u200b/g,'')
+    const entities=[...editor.querySelectorAll('[data-mention="#"], [data-mention="activity"]')].map(el=>String(el.innerText||el.textContent||'').replace(/^#/,'').replace(/\s+/g,'').toLowerCase()).filter(Boolean)
+    return {ok:true,value,trimmed:value.trim(),entities,editorText:String(editor.innerText||editor.textContent||'')}
+  })()`);
+}
+
+async function removeDouyinTrailingTopicQuery(tag, expectedCommitted = []) {
+  const expected='#'+String(tag).replace(/\s+/g,'').toLowerCase();
+  const before=await inspectDouyinTrailingPlainText();
+  if(!before.ok)return before;
+  const initial=String(before.trimmed||'').toLowerCase();
+  if(!initial)return {ok:true,alreadyClean:true,before};
+  if(!initial.startsWith('#')||!expected.startsWith(initial))return {ok:false,reason:'douyin trailing text is not a provable prefix of the failed topic query',expected,actual:before.trimmed,evidence:before};
+  const focused=await focusDouyinEditorEnd();if(!focused.ok)return focused;
+  const snapshots=[];
+  for(let attempt=0;attempt<expected.length+4;attempt+=1){
+    const current=await inspectDouyinTrailingPlainText();
+    if(!current.ok)return current;
+    snapshots.push(current.trimmed);
+    const tail=String(current.trimmed||'').toLowerCase();
+    if(!tail||!tail.startsWith('#'))break;
+    if(!expected.startsWith(tail))return {ok:false,reason:'douyin failed-topic tail changed into an unsafe value during cleanup',expected,actual:current.trimmed,snapshots};
+    await pressKey('Backspace').catch(()=>{});await wait(.18);
+  }
+  const after=await inspectDouyin();
+  const selected=after.gates.tags.evidence?.selected||[];
+  const entitiesUnchanged=selected.length===expectedCommitted.length&&selected.every((value,index)=>normalizeDouyinTopic(value)===normalizeDouyinTopic(expectedCommitted[index]));
+  const tail=await inspectDouyinTrailingPlainText();
+  const clean=!String(tail.trimmed||'').startsWith('#');
+  return clean&&entitiesUnchanged&&after.gates.description.ok
+    ? {ok:true,before,after:tail,snapshots}
+    : {ok:false,reason:'douyin failed-topic tail could not be removed without changing committed entities or prose',clean,entitiesUnchanged,description:after.gates.description.evidence,selected,expectedCommitted,tail,snapshots};
+}
+
 async function addDouyinTopic(tag) {
   const queryTag=String(tag).replace(/\s+/g,'');
-  const focused=await focusDouyinEditorEnd();
-  if(!focused.ok)return focused;
-  await cdp('Input.insertText',{text:' '});await wait(.2);
-  const buttonPoint=await js(String.raw`(() => {const c=v=>String(v||'').replace(/\s+/g,' ').trim();const item=[...document.querySelectorAll('button,[role="button"],div,span')].map(el=>({el,text:c(el.innerText||el.textContent||''),r:el.getBoundingClientRect()})).filter(x=>x.text==='#添加话题'&&x.r.width>20&&x.r.width<140&&x.r.height>=8&&x.r.height<50).sort((a,b)=>a.r.width*a.r.height-b.r.width*b.r.height)[0];if(!item)return null;item.el.scrollIntoView({block:'center',inline:'center'});const r=item.el.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`);
-  if(!buttonPoint)return {ok:false,reason:'douyin add-topic button missing'};await click([buttonPoint.x,buttonPoint.y],{label:`open douyin topic ${tag}`}).catch(()=>{});await wait(.7);await cdp('Input.insertText',{text:queryTag});await wait(2.4);
   const findRow=()=>js(String.raw`((tag) => {const c=v=>String(v||'').replace(/\s+/g,' ').trim();const expected='#'+String(tag).toLowerCase();const containers=[...document.querySelectorAll('[class*="mention-suggest-item-container"],.mention-suggest-mount-dom')].filter(el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'});const rows=containers.flatMap(container=>[...container.querySelectorAll('*')]).map(el=>({text:c(el.innerText||el.textContent||''),r:el.getBoundingClientRect()})).filter(item=>item.r.height>20&&item.r.height<90&&item.r.width>150&&(item.text.toLowerCase()===expected||item.text.toLowerCase().startsWith(expected+' '))).sort((a,b)=>a.text.length-b.text.length);const item=rows[0];return item?{x:item.r.left+Math.min(56,item.r.width/3),y:item.r.top+item.r.height/2,text:item.text}:null})(${JSON.stringify(queryTag)})`);
-  let row=null;for(let attempt=0;attempt<5&&!row;attempt+=1){row=await findRow();if(!row)await wait(.8)}
-  if(!row)return {ok:false,reason:'exact douyin topic suggestion missing',tag};await click([row.x,row.y],{label:`commit douyin topic ${tag}`}).catch(()=>{});await wait(1.4);
-  let state=await inspectDouyin();let committed=(state.gates.tags.evidence?.selected||[]).some(value=>String(value).replace(/\s+/g,'').toLowerCase()===String(tag).replace(/\s+/g,'').toLowerCase());
-  if(!committed){const retry=await findRow();if(retry){await click([retry.x,retry.y],{label:`retry douyin topic ${tag}`}).catch(()=>{});await wait(1.2);state=await inspectDouyin();committed=(state.gates.tags.evidence?.selected||[]).some(value=>String(value).replace(/\s+/g,'').toLowerCase()===String(tag).replace(/\s+/g,'').toLowerCase())}}
-  if(committed){await pressKey('ArrowRight').catch(()=>{});await cdp('Input.insertText',{text:' '}).catch(()=>{});await wait(.3);return {ok:true,text:row.text}}
-  return {ok:false,reason:'douyin topic entity was not committed',tag,evidence:state.gates.tags.evidence};
+  const attempts=[];
+  for(let attempt=1;attempt<=3;attempt+=1){
+    const before=await inspectDouyin();
+    const committedBefore=before.gates.tags.evidence?.selected||[];
+    if(committedBefore.some(value=>normalizeDouyinTopic(value)===normalizeDouyinTopic(tag)))return {ok:true,already:true,attempts};
+    const focused=await focusDouyinEditorEnd();if(!focused.ok)return focused;
+    await cdp('Input.insertText',{text:' '});await wait(.2);
+    const buttonPoint=await js(String.raw`(() => {const c=v=>String(v||'').replace(/\s+/g,' ').trim();const item=[...document.querySelectorAll('button,[role="button"],div,span')].map(el=>({el,text:c(el.innerText||el.textContent||''),r:el.getBoundingClientRect()})).filter(x=>x.text==='#添加话题'&&x.r.width>20&&x.r.width<140&&x.r.height>=8&&x.r.height<50).sort((a,b)=>a.r.width*a.r.height-b.r.width*b.r.height)[0];if(!item)return null;item.el.scrollIntoView({block:'center',inline:'center'});const r=item.el.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`);
+    if(!buttonPoint)return {ok:false,reason:'douyin add-topic button missing',attempts};
+    try{await click([buttonPoint.x,buttonPoint.y],{label:`open douyin topic ${tag}`})}catch(error){return {ok:false,reason:String(error?.message||error),attempts}}
+    await wait(.7);await cdp('Input.insertText',{text:queryTag});await wait(1.4);
+    const typed=await inspectDouyinTrailingPlainText();
+    if(String(typed.trimmed||'').toLowerCase()!==('#'+queryTag).toLowerCase()){
+      const cleanup=await removeDouyinTrailingTopicQuery(queryTag,committedBefore);
+      attempts.push({attempt,result:'query_not_exact',typed,cleanup});
+      if(!cleanup.ok)return {ok:false,reason:cleanup.reason,tag,attempts};
+      await wait(1.5*attempt);continue;
+    }
+    let row=null;for(let poll=0;poll<12&&!row;poll+=1){row=await findRow();if(!row)await wait(.8)}
+    if(!row){
+      const cleanup=await removeDouyinTrailingTopicQuery(queryTag,committedBefore);
+      attempts.push({attempt,result:'suggestion_missing',cleanup});
+      if(!cleanup.ok)return {ok:false,reason:cleanup.reason,tag,attempts};
+      await wait(1.5*attempt);continue;
+    }
+    try{await click([row.x,row.y],{label:`commit douyin topic ${tag}`})}catch(error){return {ok:false,reason:String(error?.message||error),tag,attempts}}
+    await wait(1.4);
+    let state=await inspectDouyin();let committed=(state.gates.tags.evidence?.selected||[]).some(value=>normalizeDouyinTopic(value)===normalizeDouyinTopic(tag));
+    if(!committed){const retry=await findRow();if(retry){await click([retry.x,retry.y],{label:`retry douyin topic ${tag}`}).catch(()=>{});await wait(1.2);state=await inspectDouyin();committed=(state.gates.tags.evidence?.selected||[]).some(value=>normalizeDouyinTopic(value)===normalizeDouyinTopic(tag))}}
+    if(committed){await pressKey('ArrowRight').catch(()=>{});await cdp('Input.insertText',{text:' '}).catch(()=>{});await wait(.3);return {ok:true,text:row.text,attempts:[...attempts,{attempt,result:'committed'}]}}
+    const cleanup=await removeDouyinTrailingTopicQuery(queryTag,committedBefore);
+    attempts.push({attempt,result:'entity_not_committed',cleanup,evidence:state.gates.tags.evidence});
+    if(!cleanup.ok)return {ok:false,reason:cleanup.reason,tag,attempts};
+    await wait(1.5*attempt);
+  }
+  return {ok:false,reason:'exact douyin topic suggestion did not commit after bounded retries',tag,attempts};
+}
+
+async function recoverDouyinTopicPrefix(before) {
+  const evidence=before.gates.tags.evidence||{};
+  const selected=evidence.selected||[];
+  const validPrefix=selected.length>0&&selected.length<douyinTopics.length&&!evidence.duplicates?.length
+    &&selected.every((value,index)=>normalizeDouyinTopic(value)===normalizeDouyinTopic(douyinTopics[index]));
+  const editorText=String(evidence.editorText||before.gates.description.evidence?.editorText||'').replace(/\s+/g,' ').trim();
+  const descriptionPrefix=editorText.startsWith(String(douyinDescription||'').replace(/\s+/g,' ').trim());
+  if(!validPrefix||!descriptionPrefix)return {ok:false,recoverable:false,reason:'douyin editor is not a provable description plus ordered topic prefix',selected,editorText};
+  const nextTag=douyinTopics[selected.length];
+  const cleanup=await removeDouyinTrailingTopicQuery(nextTag,selected);
+  if(!cleanup.ok)return {ok:false,recoverable:true,reason:cleanup.reason,cleanup};
+  return {ok:true,recoverable:true,selected,nextIndex:selected.length,cleanup};
 }
 
 async function turnOffDouyinSync() {
@@ -290,9 +371,18 @@ async function mutateDouyin() {
     if (!actions.title.ok) return { ...(await inspectDouyin()), blocker: typedBlocker('ACTION_FAILED', actions.title.reason, { evidence: actions.title }) };
   }
   if (!(before.gates.description.ok && before.gates.tags.ok)) {
-    actions.body = await clearAndFillDouyinBody();
-    if (!actions.body.ok) return { ...(await inspectDouyin()), blocker: typedBlocker('ACTION_FAILED', actions.body.reason) };
-    for (const tag of douyinTopics) {
+    const recovered = await recoverDouyinTopicPrefix(before);
+    let startIndex = 0;
+    if (recovered.ok) {
+      actions.bodyRecovery = recovered;
+      startIndex = recovered.nextIndex;
+    } else {
+      if (recovered.recoverable) return { ...(await inspectDouyin()), actions, blocker: typedBlocker('ACTION_FAILED', recovered.reason, { evidence: recovered }) };
+      if ((before.gates.tags.evidence?.selected||[]).length) return { ...(await inspectDouyin()), actions, blocker: typedBlocker('STATE_AMBIGUOUS', recovered.reason, { evidence: recovered }) };
+      actions.body = await clearAndFillDouyinBody();
+      if (!actions.body.ok) return { ...(await inspectDouyin()), blocker: typedBlocker('ACTION_FAILED', actions.body.reason) };
+    }
+    for (const tag of douyinTopics.slice(startIndex)) {
       const added = await addDouyinTopic(tag);
       (actions.topics ||= []).push({ tag, ...added });
       if (!added.ok) return { ...(await inspectDouyin()), actions, blocker: typedBlocker('ACTION_FAILED', added.reason, { evidence: added }) };

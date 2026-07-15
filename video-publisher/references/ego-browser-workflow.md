@@ -30,6 +30,8 @@ If the Ego Lite process exits or returns no structured observation, return a ret
 
 Because the input channel is process-wide, one such blocker circuit-breaks all remaining browser mutation in the invocation, including work queued for other task spaces. Already-started parallel runners may finish or return their own blocker; after they exit, only final read-only verification may run.
 
+This boundary is real-tested during both parallel upload and serialized mutation. In the mutation test, Ego was terminated one second after the Douyin mutator process appeared; the two later platform mutators never started.
+
 ## Platform URLs
 
 ```text

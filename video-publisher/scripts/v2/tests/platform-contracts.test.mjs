@@ -13,9 +13,12 @@ test("Xiaohongshu topics start through the native editor command", () => {
   const end = source.indexOf("async function ensureXhsOriginal", start);
   assert.ok(start >= 0 && end > start, "topic rebuild function must remain discoverable");
   const topicFlow = source.slice(start, end);
+  const lifecycle = topicFlow.indexOf("activateXhsTopicLifecycle()");
   const nativeStart = topicFlow.indexOf("topicButton.click()");
   const explicitFocus = topicFlow.indexOf("editor.focus()", nativeStart);
   const bareQuery = topicFlow.indexOf("await cdp('Input.insertText', { text: queryTag })", explicitFocus);
+  assert.ok(lifecycle >= 0 && lifecycle < nativeStart, "the hidden post-crash page must be activated before topic input");
+  assert.match(source, /Page\.setWebLifecycleState', \{ state: 'active' \}/);
   assert.ok(nativeStart >= 0, "the platform topic command must insert the leading hash");
   assert.ok(explicitFocus > nativeStart, "the editor must be refocused after the native command");
   assert.ok(bareQuery > explicitFocus, "only the bare topic query may be inserted after refocus");

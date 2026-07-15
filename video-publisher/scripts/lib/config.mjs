@@ -2,7 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-export const CONFIG_SCHEMA_VERSION = 1;
+export const CONFIG_SCHEMA_VERSION = 2;
+const LEGACY_CONFIG_SCHEMA_VERSION = 1;
 export const CONFIG_PLATFORMS = ["xiaohongshu", "douyin", "bilibili", "wechat_channels"];
 export const ORIGINALITY_POLICIES = ["ask_each_run", "all_videos_original"];
 
@@ -36,7 +37,8 @@ export function defaultConfig() {
     },
     locale: "zh-CN",
     sourceDirectory: path.join(os.homedir(), "Movies"),
-    defaultPlatforms: [...CONFIG_PLATFORMS],
+    availablePlatforms: [],
+    defaultPlatforms: [],
     contentProfile: {
       copyStyle: "clear, conversational, specific, non-hype",
       recurringTags: [],
@@ -60,8 +62,21 @@ export function defaultConfig() {
 
 export function normalizeConfig(raw = {}) {
   const fallback = defaultConfig();
+  const rawSchemaVersion = Number(raw.schemaVersion ?? fallback.schemaVersion);
+  const defaultPlatforms = Array.isArray(raw.defaultPlatforms)
+    ? cleanList(raw.defaultPlatforms)
+    : fallback.defaultPlatforms;
+  const availablePlatforms = Array.isArray(raw.availablePlatforms)
+    ? cleanList(raw.availablePlatforms)
+    : rawSchemaVersion === LEGACY_CONFIG_SCHEMA_VERSION && Array.isArray(raw.defaultPlatforms)
+      ? [...defaultPlatforms]
+      : Object.keys(raw).length === 0
+        ? fallback.availablePlatforms
+        : [];
   return {
-    schemaVersion: raw.schemaVersion ?? fallback.schemaVersion,
+    schemaVersion: rawSchemaVersion === LEGACY_CONFIG_SCHEMA_VERSION
+      ? CONFIG_SCHEMA_VERSION
+      : rawSchemaVersion,
     onboarding: {
       completed: raw.onboarding?.completed === true,
       completedAt: String(raw.onboarding?.completedAt || ""),
@@ -69,9 +84,8 @@ export function normalizeConfig(raw = {}) {
     },
     locale: String(raw.locale || fallback.locale).trim(),
     sourceDirectory: String(raw.sourceDirectory || fallback.sourceDirectory).trim(),
-    defaultPlatforms: Array.isArray(raw.defaultPlatforms)
-      ? cleanList(raw.defaultPlatforms)
-      : fallback.defaultPlatforms,
+    availablePlatforms,
+    defaultPlatforms,
     contentProfile: {
       copyStyle: String(raw.contentProfile?.copyStyle || fallback.contentProfile.copyStyle).trim(),
       recurringTags: cleanList(raw.contentProfile?.recurringTags || []),
@@ -104,9 +118,16 @@ export function validateConfig(config) {
   }
   if (!config.locale) errors.push("locale is required");
   if (!path.isAbsolute(config.sourceDirectory)) errors.push("sourceDirectory must be an absolute path");
+  if (!config.availablePlatforms.length) errors.push("availablePlatforms must not be empty");
+  const unsupportedAvailable = config.availablePlatforms.filter(platform => !CONFIG_PLATFORMS.includes(platform));
+  if (unsupportedAvailable.length) errors.push(`unsupported availablePlatforms: ${unsupportedAvailable.join(", ")}`);
   if (!config.defaultPlatforms.length) errors.push("defaultPlatforms must not be empty");
   const unsupported = config.defaultPlatforms.filter(platform => !CONFIG_PLATFORMS.includes(platform));
   if (unsupported.length) errors.push(`unsupported defaultPlatforms: ${unsupported.join(", ")}`);
+  const unavailableDefaults = config.defaultPlatforms.filter(platform => !config.availablePlatforms.includes(platform));
+  if (unavailableDefaults.length) {
+    errors.push(`defaultPlatforms must be a subset of availablePlatforms: ${unavailableDefaults.join(", ")}`);
+  }
   if (config.platforms.douyin.defaultTopics.length > 5) {
     errors.push("platforms.douyin.defaultTopics supports at most 5 topics");
   }
@@ -172,6 +193,7 @@ export function createOnboardedConfig(input = {}) {
     },
     locale: input.locale,
     sourceDirectory: input.sourceDirectory,
+    availablePlatforms: input.availablePlatforms,
     defaultPlatforms: input.defaultPlatforms,
     contentProfile: input.contentProfile,
     declarations: input.declarations,

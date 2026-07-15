@@ -1,6 +1,6 @@
 ---
 name: video-publisher
-description: Prepare and automate video drafts for Xiaohongshu, Douyin, Bilibili, and WeChat Channels with Ego Lite. Use for first-run onboarding, per-user publishing defaults, video intake, platform copy and tags, parallel upload scheduling, draft recovery, original declarations, optional upload of provided cover assets, custom publishing-workflow extensions, and verification before final publish.
+description: Prepare and automate video drafts for Xiaohongshu, Douyin, Bilibili, and WeChat Channels with Ego Lite. Use for first-run onboarding, per-user available/default platform selection, video intake, platform copy and tags, parallel upload scheduling, draft recovery, original declarations, optional upload of provided cover assets, custom publishing-workflow extensions, and verification before final publish.
 ---
 
 # Video Publisher
@@ -15,11 +15,11 @@ At the start of every invocation, before inspecting a video or opening a browser
 node scripts/config.mjs status
 ```
 
-If `onboardingRequired` is `true`, stop the publishing flow and onboard the user. Ask only for the source directory, default platforms, copy/tag preferences, Douyin default topics, Bilibili automatic-tag allowlist, and whether every video may truthfully be declared original; keep concurrency `4/4` and platform cover as proposed defaults unless the user changes them. Save with `scripts/config.mjs onboard`, run `status` again, and continue only when `onboardingRequired` is `false`.
+If `onboardingRequired` is `true`, stop the publishing flow and onboard the user. Ask first which supported creator platforms the user actually has; require at least one and never assume all four. Then ask which of those available platforms should run by default, proposing all available platforms as the default subset. Ask for Douyin topics only when Douyin is available and Bilibili automatic tags only when Bilibili is available. Collect the source directory, shared copy/tag preferences, and whether every video may truthfully be declared original; keep concurrency `4/4` and platform cover as proposed defaults unless the user changes them. Summarize the choices before writing. Save available accounts with repeatable `--available-platform` flags and defaults with repeatable `--platform` flags, run `validate`, and continue only when `onboardingRequired` is `false`.
 
 Configuration is per user at `$XDG_CONFIG_HOME/video-publisher/config.json`, or `$HOME/.config/video-publisher/config.json`. `VIDEO_PUBLISHER_CONFIG` overrides the path. Never put a user's configuration inside the shareable Skill folder.
 
-An explicit current request overrides the package; explicit package fields override configuration defaults. The onboarding configuration may persist the user's truthful standing originality policy, but never login state, video-specific paths, or final-publish authorization. Read `references/configuration.md` for the schema and onboarding command.
+An explicit current request overrides the package; explicit package fields override configuration defaults. A current request may select any configured available platform, but it cannot silently add an unavailable platform: update onboarding and confirm that account first. The onboarding configuration may persist the user's truthful standing originality policy and declared platform availability, but never cookies, credentials, video-specific paths, or final-publish authorization. Read `references/configuration.md` for the schema and onboarding command.
 
 ## Safety Boundary
 
@@ -133,7 +133,7 @@ Distinguish “some video is uploaded” from “the target video is uploaded”
 
 ## Content Package
 
-Use the onboarded configuration as defaults, then confirm the source video, platform selection, title, tags, any unresolved rights/declaration status, and existing-cover upload intent before browser automation. Newlines in JSON fields must be real newline characters.
+Use the onboarded configuration as defaults, then confirm the source video, platform selection from `availablePlatforms`, title, tags, any unresolved rights/declaration status, and existing-cover upload intent before browser automation. Newlines in JSON fields must be real newline characters.
 
 Use platform-native defaults:
 
@@ -157,7 +157,7 @@ Run `scripts/check-package.mjs` for every selected platform before browser work.
 
 ## Default Flow
 
-1. Load configuration and complete onboarding when required.
+1. Load configuration and complete onboarding, including available and default platform selection, when required.
 2. Identify the exact local source and any subtitle variant.
 3. Propose and confirm the package and selected platforms.
 4. Validate any user-supplied cover assets before browser work.

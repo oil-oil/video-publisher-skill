@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-labelledby="title desc">
+  <title id="title">Video Publisher</title>
+  <desc id="desc">一个本地视频经过并行上传、串行页面操作和独立验证，被准备成小红书、抖音、Bilibili 和微信视频号四个平台的发布前草稿。</desc>
+
+  <defs>
+    <symbol id="logo-xiaohongshu" viewBox="0 0 24 24">
+      <path d="M22.405 9.879c.002.016.01.02.07.019h.725a.797.797 0 0 0 .78-.972.794.794 0 0 0-.884-.618.795.795 0 0 0-.692.794c0 .101-.002.666.001.777zm-11.509 4.808c-.203.001-1.353.004-1.685.003a2.528 2.528 0 0 1-.766-.126.025.025 0 0 0-.03.014L7.7 16.127a.025.025 0 0 0 .01.032c.111.06.336.124.495.124.66.01 1.32.002 1.981 0 .01 0 .02-.006.023-.015l.712-1.545a.025.025 0 0 0-.024-.036zM.477 9.91c-.071 0-.076.002-.076.01a.834.834 0 0 0-.01.08c-.027.397-.038.495-.234 3.06-.012.24-.034.389-.135.607-.026.057-.033.042.003.112.046.092.681 1.523.787 1.74.008.015.011.02.017.02.008 0 .033-.026.047-.044.147-.187.268-.391.371-.606.306-.635.44-1.325.486-1.706.014-.11.021-.22.03-.33l.204-2.616.022-.293c.003-.029 0-.033-.03-.034zm7.203 3.757a1.427 1.427 0 0 1-.135-.607c-.004-.084-.031-.39-.235-3.06a.443.443 0 0 0-.01-.082c-.004-.011-.052-.008-.076-.008h-1.48c-.03.001-.034.005-.03.034l.021.293c.076.982.153 1.964.233 2.946.05.4.186 1.085.487 1.706.103.215.223.419.37.606.015.018.037.051.048.049.02-.003.742-1.642.804-1.765.036-.07.03-.055.003-.112zm3.861-.913h-.872a.126.126 0 0 1-.116-.178l1.178-2.625a.025.025 0 0 0-.023-.035l-1.318-.003a.148.148 0 0 1-.135-.21l.876-1.954a.025.025 0 0 0-.023-.035h-1.56c-.01 0-.02.006-.024.015l-.926 2.068c-.085.169-.314.634-.399.938a.534.534 0 0 0-.02.191.46.46 0 0 0 .23.378.981.981 0 0 0 .46.119h.59c.041 0-.688 1.482-.834 1.972a.53.53 0 0 0-.023.172.465.465 0 0 0 .23.398c.15.092.342.12.475.12l1.66-.001c.01 0 .02-.006.023-.015l.575-1.28a.025.025 0 0 0-.024-.035zm-6.93-4.937H3.1a.032.032 0 0 0-.034.033c0 1.048-.01 2.795-.01 6.829 0 .288-.269.262-.28.262h-.74c-.04.001-.044.004-.04.047.001.037.465 1.064.555 1.263.01.02.03.033.051.033.157.003.767.009.938-.014.153-.02.3-.06.438-.132.3-.156.49-.419.595-.765.052-.172.075-.353.075-.533.002-2.33 0-4.66-.007-6.991a.032.032 0 0 0-.032-.032zm11.784 6.896c0-.014-.01-.021-.024-.022h-1.465c-.048-.001-.049-.002-.05-.049v-4.66c0-.072-.005-.07.07-.07h.863c.08 0 .075.004.075-.074V8.393c0-.082.006-.076-.08-.076h-3.5c-.064 0-.075-.006-.075.073v1.445c0 .083-.006.077.08.077h.854c.075 0 .07-.004.07.07v4.624c0 .095.008.084-.085.084-.37 0-1.11-.002-1.304 0-.048.001-.06.03-.06.03l-.697 1.519s-.014.025-.008.036c.006.01.013.008.058.008 1.748.003 3.495.002 5.243.002.03-.001.034-.006.035-.033v-1.539zm4.177-3.43c0 .013-.007.023-.02.024-.346.006-.692.004-1.037.004-.014-.002-.022-.01-.022-.024-.005-.434-.007-.869-.01-1.303 0-.072-.006-.071.07-.07l.733-.003c.041 0 .081.002.12.015.093.025.16.107.165.204.006.431.002 1.153.001 1.153zm2.67.244a1.953 1.953 0 0 0-.883-.222h-.18c-.04-.001-.04-.003-.042-.04V10.21c0-.132-.007-.263-.025-.394a1.823 1.823 0 0 0-.153-.53 1.533 1.533 0 0 0-.677-.71 2.167 2.167 0 0 0-1-.258c-.153-.003-.567 0-.72 0-.07 0-.068.004-.068-.065V7.76c0-.031-.01-.041-.046-.039H17.93s-.016 0-.023.007c-.006.006-.008.012-.008.023v.546c-.008.036-.057.015-.082.022h-.95c-.022.002-.028.008-.03.032v1.481c0 .09-.004.082.082.082h.913c.082 0 .072.128.072.128V11.19s.003.117-.06.117h-1.482c-.068 0-.06.082-.06.082v1.445s-.01.068.064.068h1.457c.082 0 .076-.006.076.079v3.225c0 .088-.007.081.082.081h1.43c.09 0 .082.007.082-.08v-3.27c0-.029.006-.035.033-.035l2.323-.003c.098 0 .191.02.28.061a.46.46 0 0 1 .274.407c.008.395.003.79.003 1.185 0 .259-.107.367-.33.367h-1.218c-.023.002-.029.008-.028.033.184.437.374.871.57 1.303a.045.045 0 0 0 .04.026c.17.005.34.002.51.003.15-.002.517.004.666-.01a2.03 2.03 0 0 0 .408-.075c.59-.18.975-.698.976-1.313v-1.981c0-.128-.01-.254-.034-.38 0 .078-.029-.641-.724-.998z"/>
+    </symbol>
+    <symbol id="logo-douyin" viewBox="0 0 24 24">
+      <path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/>
+    </symbol>
+    <symbol id="logo-bilibili" viewBox="0 0 24 24">
+      <path d="M17.813 4.653h.854c1.51.054 2.769.578 3.773 1.574 1.004.995 1.524 2.249 1.56 3.76v7.36c-.036 1.51-.556 2.769-1.56 3.773s-2.262 1.524-3.773 1.56H5.333c-1.51-.036-2.769-.556-3.773-1.56S.036 18.858 0 17.347v-7.36c.036-1.511.556-2.765 1.56-3.76 1.004-.996 2.262-1.52 3.773-1.574h.774l-1.174-1.12a1.234 1.234 0 0 1-.373-.906c0-.356.124-.658.373-.907l.027-.027c.267-.249.573-.373.92-.373.347 0 .653.124.92.373L9.653 4.44c.071.071.134.142.187.213h4.267a.836.836 0 0 1 .16-.213l2.853-2.747c.267-.249.573-.373.92-.373.347 0 .662.151.929.4.267.249.391.551.391.907 0 .355-.124.657-.373.906zM5.333 7.24c-.746.018-1.373.276-1.88.773-.506.498-.769 1.13-.786 1.894v7.52c.017.764.28 1.395.786 1.893.507.498 1.134.756 1.88.773h13.334c.746-.017 1.373-.275 1.88-.773.506-.498.769-1.129.786-1.893v-7.52c-.017-.765-.28-1.396-.786-1.894-.507-.497-1.134-.755-1.88-.773zM8 11.107c.373 0 .684.124.933.373.25.249.383.569.4.96v1.173c-.017.391-.15.711-.4.96-.249.25-.56.374-.933.374s-.684-.125-.933-.374c-.25-.249-.383-.569-.4-.96V12.44c0-.373.129-.689.386-.947.258-.257.574-.386.947-.386zm8 0c.373 0 .684.124.933.373.25.249.383.569.4.96v1.173c-.017.391-.15.711-.4.96-.249.25-.56.374-.933.374s-.684-.125-.933-.374c-.25-.249-.383-.569-.4-.96V12.44c.017-.391.15-.711.4-.96.249-.249.56-.373.933-.373Z"/>
+    </symbol>
+    <symbol id="logo-wechat-channels" viewBox="0 0 24 24">
+      <path d="M12 12C9.4 7.2 7.6 4.2 6 4.2C4.2 4.2 3 7.5 3 12S4.2 19.8 6 19.8C7.6 19.8 9.4 16.8 12 12ZM12 12C14.6 7.2 16.4 4.2 18 4.2C19.8 4.2 21 7.5 21 12S19.8 19.8 18 19.8C16.4 19.8 14.6 16.8 12 12Z"/>
+    </symbol>
+  </defs>
+
+  <rect width="1200" height="420" rx="28" fill="#F7F8FC"/>
+  <rect x="1" y="1" width="1198" height="418" rx="27" fill="none" stroke="#E3E7EF" stroke-width="2"/>
+
+  <g id="title-block" transform="translate(58 48)">
+    <text fill="#11866F" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16" font-weight="700" letter-spacing="2">EGO LITE · CREATOR WORKFLOW</text>
+    <text y="67" fill="#172033" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="54" font-weight="750">Video Publisher</text>
+    <text y="113" fill="#33405A" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="25" font-weight="650">一个视频，准备四个平台草稿</text>
+    <text y="151" fill="#728097" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="18">并行上传 · 串行填写 · 独立验收</text>
+
+    <g transform="translate(0 188)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14" font-weight="700">
+      <rect width="122" height="36" rx="18" fill="#FFFFFF" stroke="#DCE2EB"/>
+      <circle cx="18" cy="18" r="4" fill="#22A978"/>
+      <text x="31" y="23" fill="#3E4A60">UPLOAD ×4</text>
+
+      <g transform="translate(134 0)">
+        <rect width="98" height="36" rx="18" fill="#FFFFFF" stroke="#DCE2EB"/>
+        <circle cx="18" cy="18" r="4" fill="#F2A23A"/>
+        <text x="31" y="23" fill="#3E4A60">UI ×1</text>
+      </g>
+
+      <g transform="translate(244 0)">
+        <rect width="120" height="36" rx="18" fill="#FFFFFF" stroke="#DCE2EB"/>
+        <circle cx="18" cy="18" r="4" fill="#22A978"/>
+        <text x="31" y="23" fill="#3E4A60">VERIFY ×4</text>
+      </g>
+    </g>
+  </g>
+
+  <g id="routing-proof" transform="translate(600 42)">
+    <g id="source-file" transform="translate(0 96)">
+      <rect width="176" height="112" rx="18" fill="#FFFFFF" stroke="#CFD6E2" stroke-width="1.5"/>
+      <rect x="18" y="18" width="44" height="54" rx="9" fill="#FFF3DF" stroke="#F0C47E"/>
+      <path d="M31 39L44 46L31 53Z" fill="#F2A23A"/>
+      <text x="76" y="43" fill="#253047" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14" font-weight="700">VIDEO.MP4</text>
+      <text x="76" y="65" fill="#7B879B" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12">LOCAL SOURCE</text>
+      <rect x="18" y="87" width="140" height="6" rx="3" fill="#E8ECF2"/>
+      <rect x="18" y="87" width="140" height="6" rx="3" fill="#22A978"/>
+    </g>
+
+    <g id="route-lines" fill="none" stroke="#BAC4D3" stroke-width="2">
+      <path d="M176 152H222V42H252"/>
+      <path d="M222 152V116H252"/>
+      <path d="M222 152V190H252"/>
+      <path d="M222 152V264H252"/>
+    </g>
+    <circle cx="222" cy="152" r="6" fill="#F2A23A"/>
+
+    <g id="platform-drafts" transform="translate(252 0)" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif">
+      <g>
+        <rect width="286" height="60" rx="15" fill="#FFFFFF" stroke="#D8DEE8"/>
+        <rect x="12" y="10" width="40" height="40" rx="11" fill="#FFF0F3"/>
+        <use href="#logo-xiaohongshu" x="20" y="18" width="24" height="24" fill="#FF2442"/>
+        <text x="64" y="25" fill="#253047" font-size="16" font-weight="700">小红书</text>
+        <text x="64" y="45" fill="#7B879B" font-size="12">标题 · 话题 · 原创 · 封面</text>
+        <rect x="226" y="18" width="48" height="24" rx="12" fill="#ECF8F1"/>
+        <text x="250" y="34" text-anchor="middle" fill="#168B5B" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="700">READY</text>
+      </g>
+
+      <g transform="translate(0 74)">
+        <rect width="286" height="60" rx="15" fill="#FFFFFF" stroke="#D8DEE8"/>
+        <rect x="12" y="10" width="40" height="40" rx="11" fill="#F1F2F5"/>
+        <use href="#logo-douyin" x="19" y="17" width="24" height="24" fill="#25F4EE" transform="translate(-1 1)"/>
+        <use href="#logo-douyin" x="19" y="17" width="24" height="24" fill="#FE2C55" transform="translate(1 -1)"/>
+        <use href="#logo-douyin" x="19" y="17" width="24" height="24" fill="#161823"/>
+        <text x="64" y="25" fill="#253047" font-size="16" font-weight="700">抖音</text>
+        <text x="64" y="45" fill="#7B879B" font-size="12">正文 · 话题 · 原创 · 双封面</text>
+        <rect x="226" y="18" width="48" height="24" rx="12" fill="#ECF8F1"/>
+        <text x="250" y="34" text-anchor="middle" fill="#168B5B" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="700">READY</text>
+      </g>
+
+      <g transform="translate(0 148)">
+        <rect width="286" height="60" rx="15" fill="#FFFFFF" stroke="#D8DEE8"/>
+        <rect x="12" y="10" width="40" height="40" rx="11" fill="#EDF9FD"/>
+        <use href="#logo-bilibili" x="20" y="18" width="24" height="24" fill="#00A1D6"/>
+        <text x="64" y="25" fill="#253047" font-size="16" font-weight="700">Bilibili</text>
+        <text x="64" y="45" fill="#7B879B" font-size="12">简介 · 标签 · 自制 · 草稿隔离</text>
+        <rect x="226" y="18" width="48" height="24" rx="12" fill="#ECF8F1"/>
+        <text x="250" y="34" text-anchor="middle" fill="#168B5B" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="700">READY</text>
+      </g>
+
+      <g transform="translate(0 222)">
+        <rect width="286" height="60" rx="15" fill="#FFFFFF" stroke="#D8DEE8"/>
+        <rect x="12" y="10" width="40" height="40" rx="11" fill="#FFF4E7"/>
+        <use href="#logo-wechat-channels" x="20" y="18" width="24" height="24" fill="none" stroke="#F2A23A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="64" y="25" fill="#253047" font-size="16" font-weight="700">微信视频号</text>
+        <text x="64" y="45" fill="#7B879B" font-size="12">描述 · 话题 · 原创 · 双封面</text>
+        <rect x="226" y="18" width="48" height="24" rx="12" fill="#ECF8F1"/>
+        <text x="250" y="34" text-anchor="middle" fill="#168B5B" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="700">READY</text>
+      </g>
+    </g>
+  </g>
+
+  <g id="safety-boundary" transform="translate(58 348)">
+    <rect width="1084" height="42" rx="13" fill="#FFF7E9" stroke="#EBC98F"/>
+    <path d="M18 11L28 16V23C28 29 24 33 18 35C12 33 8 29 8 23V16Z" fill="#F2A23A"/>
+    <path d="M14 22L17 25L23 18" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="43" y="26" fill="#91591D" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="700" letter-spacing="1">FINAL PUBLISH SAFETY GATE</text>
+    <text x="1032" y="26" text-anchor="end" fill="#6C5940" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="14">READY ≠ 已发布 · 默认停在最终按钮前</text>
+  </g>
+</svg>

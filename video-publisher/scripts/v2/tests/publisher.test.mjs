@@ -111,6 +111,34 @@ test("publisher blocks browser work when onboarding is incomplete", async () => 
   assert.match(result.stderr,/onboarding is incomplete/);
 });
 
+test("publisher rejects platforms that were not configured as available", async () => {
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-platform-availability-test-"));
+  const configPath=path.join(root,"config.json");
+  const log=path.join(root,"events.ndjson");
+  await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:2,onboarding:{completed:true},sourceDirectory:root,availablePlatforms:["xiaohongshu"],defaultPlatforms:["xiaohongshu"]}));
+  const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),path.join(root,"missing-package.json"),"availability-test","douyin"],{env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_MOCK_LOG:log}});
+  assert.equal(result.code,2);
+  assert.match(result.stderr,/Platform is not configured as available: douyin/);
+  assert.equal(fs.existsSync(log),false,"unavailable platforms must be rejected before browser work");
+  await fs.promises.rm(root,{recursive:true,force:true});
+});
+
+test("publisher allows an available non-default platform when explicitly selected", async () => {
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-platform-override-test-"));
+  const videoPath=path.join(root,"sample-video.mp4");
+  const packagePath=path.join(root,"package.json");
+  const configPath=path.join(root,"config.json");
+  const log=path.join(root,"events.ndjson");
+  await fs.promises.writeFile(videoPath,"test video fixture");
+  await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Availability override",douyinTopics:["Test"],cover:{uploadCustomCover:false}}));
+  await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:2,onboarding:{completed:true},sourceDirectory:root,availablePlatforms:["xiaohongshu","douyin"],defaultPlatforms:["xiaohongshu"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:2,uploadConcurrency:2}}));
+  const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"availability-override","douyin","--state-root",root],{env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),VIDEO_PUBLISHER_V2_MOCK_LOG:log}});
+  assert.equal(result.code,0,`${result.stderr}\n${result.stdout}`);
+  const events=(await fs.promises.readFile(log,"utf8")).trim().split(/\n/).map(line=>JSON.parse(line));
+  assert.deepEqual(new Set(events.map(item=>item.platform)),new Set(["douyin"]));
+  await fs.promises.rm(root,{recursive:true,force:true});
+});
+
 test("publisher requires current-run confirmation when onboarding policy asks each run", async () => {
   const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-rights-test-"));
   const videoPath=path.join(root,"sample-video.mp4");

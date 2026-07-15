@@ -70,6 +70,10 @@ function parseArgs(argv) {
   if (positional.length && !PLATFORMS.includes(positional[0])) taskSuffix = positional.shift();
   const platforms = positional.length ? positional : [...config.defaultPlatforms];
   if (platforms.some(platform => !PLATFORMS.includes(platform))) throw new UsageError("Unsupported platform argument");
+  const unavailablePlatforms = platforms.filter(platform => !config.availablePlatforms.includes(platform));
+  if (unavailablePlatforms.length) {
+    throw new UsageError(`Platform is not configured as available: ${unavailablePlatforms.join(", ")}. Update Video Publisher onboarding before browser work.`);
+  }
   return { ...options, packagePath, taskSuffix, platforms };
 }
 

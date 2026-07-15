@@ -2,7 +2,7 @@
 
 Start from a video link or local file path.
 
-Before intake, read `node scripts/config.mjs status`. Use `sourceDirectory`, `defaultPlatforms`, `contentProfile`, platform defaults, and cover preference as proposals only. A current user instruction or explicit package field always wins.
+Before intake, read `node scripts/config.mjs status`. Use `sourceDirectory`, `availablePlatforms`, `defaultPlatforms`, `contentProfile`, platform defaults, and cover preference as proposals only. A current user instruction or explicit package field wins within `availablePlatforms`. If the user asks for an unavailable platform, update onboarding and confirm the account before any browser work.
 
 ## Video Input
 
@@ -100,7 +100,7 @@ When the user has not provided title and tags:
 你觉得合适吗？可以直接改标题或 tag。
 ```
 
-After the user approves title and tags, ask for platform selection. Mention that existing-cover upload is skipped by default.
+After the user approves title and tags, ask for platform selection from `availablePlatforms`, proposing `defaultPlatforms`. Mention that existing-cover upload is skipped by default.
 
 ## Final Package
 

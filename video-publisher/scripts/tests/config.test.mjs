@@ -33,6 +33,8 @@ test("missing or empty configuration requires onboarding", async () => {
   const empty = configStatus(configPath);
   assert.equal(empty.empty, true);
   assert.equal(empty.onboardingRequired, true);
+  assert.deepEqual(empty.config.availablePlatforms, []);
+  assert.deepEqual(empty.config.defaultPlatforms, []);
   assert.equal(empty.config.declarations.originalityPolicy, "ask_each_run");
   await fs.promises.rm(root, { recursive: true, force: true });
 });
@@ -43,6 +45,7 @@ test("completed onboarding writes a valid private per-user configuration", async
   const config = createOnboardedConfig({
     locale: "zh-CN",
     sourceDirectory: root,
+    availablePlatforms: ["xiaohongshu", "douyin", "bilibili"],
     defaultPlatforms: ["douyin", "bilibili"],
     contentProfile: { recurringTags: ["Tutorial"] },
     declarations: { originalityPolicy: "all_videos_original" },
@@ -54,6 +57,7 @@ test("completed onboarding writes a valid private per-user configuration", async
   writeConfig(config, configPath);
   const ready = configStatus(configPath);
   assert.equal(ready.onboardingRequired, false);
+  assert.deepEqual(ready.config.availablePlatforms, ["xiaohongshu", "douyin", "bilibili"]);
   assert.deepEqual(ready.config.defaultPlatforms, ["douyin", "bilibili"]);
   assert.deepEqual(ready.config.platforms.douyin.defaultTopics, ["Tutorial"]);
   assert.equal(ready.config.declarations.originalityPolicy, "all_videos_original");
@@ -68,6 +72,9 @@ test("onboarding CLI persists repeated platform and topic options", async () => 
     SCRIPT_PATH,
     "onboard",
     "--source-dir", root,
+    "--available-platform", "xiaohongshu",
+    "--available-platform", "douyin",
+    "--available-platform", "bilibili",
     "--platform", "douyin",
     "--platform", "bilibili",
     "--recurring-tag", "Tutorial",
@@ -78,9 +85,54 @@ test("onboarding CLI persists repeated platform and topic options", async () => 
   assert.equal(result.code, 0, `${result.stderr}\n${result.stdout}`);
   const output = JSON.parse(result.stdout);
   assert.equal(output.onboardingRequired, false);
+  assert.deepEqual(output.config.availablePlatforms, ["xiaohongshu", "douyin", "bilibili"]);
   assert.deepEqual(output.config.defaultPlatforms, ["douyin", "bilibili"]);
   assert.deepEqual(output.config.platforms.douyin.defaultTopics, ["Tutorial"]);
   assert.deepEqual(output.config.platforms.bilibili.allowedAutoTags, ["Platform tag"]);
   assert.equal(output.config.declarations.originalityPolicy, "all_videos_original");
+  await fs.promises.rm(root, { recursive: true, force: true });
+});
+
+test("onboarding defaults to every available platform when no default subset is supplied", async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "video-publisher-config-available-defaults-"));
+  const configPath = path.join(root, "config.json");
+  const result = await run(process.execPath, [
+    SCRIPT_PATH,
+    "onboard",
+    "--source-dir", root,
+    "--available-platform", "xiaohongshu",
+    "--available-platform", "wechat_channels",
+  ], { env: { ...process.env, VIDEO_PUBLISHER_CONFIG: configPath } });
+  assert.equal(result.code, 0, `${result.stderr}\n${result.stdout}`);
+  const output = JSON.parse(result.stdout);
+  assert.deepEqual(output.config.availablePlatforms, ["xiaohongshu", "wechat_channels"]);
+  assert.deepEqual(output.config.defaultPlatforms, ["xiaohongshu", "wechat_channels"]);
+  await fs.promises.rm(root, { recursive: true, force: true });
+});
+
+test("schema 1 configurations conservatively migrate available platforms from old defaults", async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "video-publisher-config-legacy-"));
+  const configPath = path.join(root, "config.json");
+  await fs.promises.writeFile(configPath, JSON.stringify({
+    schemaVersion: 1,
+    onboarding: { completed: true },
+    sourceDirectory: root,
+    defaultPlatforms: ["douyin", "bilibili"],
+  }));
+  const migrated = configStatus(configPath);
+  assert.equal(migrated.onboardingRequired, false);
+  assert.equal(migrated.config.schemaVersion, 2);
+  assert.deepEqual(migrated.config.availablePlatforms, ["douyin", "bilibili"]);
+  assert.deepEqual(migrated.config.defaultPlatforms, ["douyin", "bilibili"]);
+  await fs.promises.rm(root, { recursive: true, force: true });
+});
+
+test("default platforms must be selected from available creator accounts", async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "video-publisher-config-subset-"));
+  assert.throws(() => createOnboardedConfig({
+    sourceDirectory: root,
+    availablePlatforms: ["xiaohongshu"],
+    defaultPlatforms: ["douyin"],
+  }), /defaultPlatforms must be a subset of availablePlatforms: douyin/);
   await fs.promises.rm(root, { recursive: true, force: true });
 });

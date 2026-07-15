@@ -1,6 +1,6 @@
 ---
 name: video-publisher
-description: Prepare and automate video drafts for Xiaohongshu, Douyin, Bilibili, and WeChat Channels with Ego Lite. Use for first-run onboarding, per-user publishing defaults, video intake, platform copy and tags, parallel upload scheduling, draft recovery, original declarations, optional upload of provided cover assets, and verification before final publish.
+description: Prepare and automate video drafts for Xiaohongshu, Douyin, Bilibili, and WeChat Channels with Ego Lite. Use for first-run onboarding, per-user publishing defaults, video intake, platform copy and tags, parallel upload scheduling, draft recovery, original declarations, optional upload of provided cover assets, custom publishing-workflow extensions, and verification before final publish.
 ---
 
 # Video Publisher
@@ -80,6 +80,12 @@ Job state also keeps a one-generation atomic backup. If `state.json` is invalid 
 - If Ego reports that the user took control, stop all browser work. Resume only after the user explicitly says to continue, then claim the recorded task space.
 
 Read `references/ego-browser-workflow.md` before browser diagnosis or adapter changes.
+
+## Custom Workflow Extensions
+
+When the user asks to add, remove, reorder, or customize a publishing step—for example, “在抖音填完标题后点击某个按钮”—read `references/customizing-workflows.md` before diagnosing the page or editing an adapter.
+
+Use the extension workflow to turn the request into an idempotent `inspect -> action -> verify` step backed by real creator-page evidence. Classify the behavior as a generic adapter repair, an explicit package/config option, or a private per-user default before choosing where it belongs. Never encode personal account data in the shareable Skill, and never let a customization bypass final-publish authorization, truthful originality policy, task-space ownership, or the shared safety gate.
 
 ## Phases And Evidence
 
@@ -217,6 +223,8 @@ A sixteenth resilience regression killed the entire Ego Lite browser process gro
 A seventeenth resilience regression killed Ego Lite while a real 322 MB four-platform job still had active uploads. The first post-crash invocation proved the shared-channel boundary; the repaired orchestrator emitted `UI serial: none (input channel broken)` and performed no mutation after the structured blocker. Ego then recycled numeric ids `1` and `2` for another job. Stable-name identity rejected both collisions, recreated or selected only the recorded task-space names, and recovered the intended four drafts. Sustained browser load also reproduced empty topic-candidate panels: Xiaohongshu now retries an exact whole-topic rebuild with finite waits, while Douyin preserves a proven ordered prefix of committed entities, deletes only a trailing failed query one real Backspace at a time, and retries only the missing topic. The same failed pages recovered all titles, descriptions, exact tags/topics, original declarations, custom covers, and safety gates to four-platform `READY`; three full reruns were pure `inspect`/`verify` no-ops. No final publish control was clicked.
 
 An eighteenth cold-start regression used a different 201 MB source whose video and both cover filenames contained a trailing-space-style boundary before their suffixes. Four parallel uploads used the exact paths, Bilibili quarantined the prior foreign draft, and Xiaohongshu, Bilibili, and WeChat Channels reached `READY` on their first serialized mutations. Douyin exposed a new zero-entity editor shape: its exact description and first topic query shared one framework text node, so the initial tail detector treated the entire description as the query and a failed clear left `#A`. The adapter now isolates the suffix after the exact description and treats zero committed entities as a valid ordered prefix. The same damaged page proved cleanup `#A -> # -> empty`, committed all five requested entities, uploaded distinct 3:4 and 4:3 covers, and returned four-platform `READY`. Three full reruns were pure no-op `READY` passes, all final guards remained armed with zero attempts, and no final publish control was clicked.
+
+A nineteenth resilience regression used an independent process monitor to terminate Ego Lite one second after the real Douyin `mutate` runner started. Xiaohongshu had reached `READY`; Douyin returned structured `INPUT_CHANNEL_BROKEN`; Bilibili and WeChat Channels recorded no mutation phase at all, proving the invocation-wide circuit breaker during serialized UI work. After Ego restarted, the ordinary same-job command re-read the empty replacement pages, reused Bilibili's matching local draft without a video upload, and rebuilt only lost browser state. Recovery then exposed why Xiaohongshu candidates could appear long after bounded retries: the readable task-space tab still had `document.visibilityState: hidden`, and its timers were throttled. The topic adapter now activates and focuses the page immediately before serialized topic repair. The same failed page committed all four topics on its first rebuild, restored its 3:4 receipt, and returned four-platform `READY`; three full reruns were inspect/verify-only no-ops. Every final guard remained armed with zero attempts, and no final publish control was clicked.
 
 A passing platform-specific diagnostic still does not replace this system-level regression when scheduler, persistence, or shared-browser behavior changes.
 

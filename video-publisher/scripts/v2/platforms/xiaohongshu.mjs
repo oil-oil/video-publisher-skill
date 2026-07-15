@@ -140,9 +140,22 @@ async function uploadXiaohongshu() {
   return await waitXiaohongshuUploadCompletion('injected');
 }
 
+async function activateXhsTopicLifecycle() {
+  await cdp('Page.bringToFront', {}).catch(() => {});
+  await cdp('Page.setWebLifecycleState', { state: 'active' }).catch(() => {});
+  await cdp('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {});
+  await wait(.35);
+  const state=await js(String.raw`(() => ({visibility:document.visibilityState,hasFocus:document.hasFocus()}))()`);
+  return state.visibility==='visible'&&state.hasFocus
+    ? {ok:true,...state}
+    : {ok:false,reason:'xiaohongshu topic page did not become visible and focused',...state};
+}
+
 async function rebuildXhsTopics() {
   const attempts=[];
   for(let rebuildAttempt=1;rebuildAttempt<=3;rebuildAttempt+=1){
+    const lifecycle=await activateXhsTopicLifecycle();
+    if(!lifecycle.ok)return {...lifecycle,attempts};
     const cleared = await js(String.raw`(() => {
       const editors = [...document.querySelectorAll('[contenteditable="true"], [contenteditable=""]')]
       const editor = editors.find(el => el.querySelector('a') || /话题|creator-editor/i.test(String(el.className || ''))) || editors[0]

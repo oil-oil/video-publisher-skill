@@ -113,7 +113,7 @@ try {
   result = parseV2Result(combined, "Ego runner");
 } catch (error) {
   const detail = combined.trim().slice(-1600);
-  const userControl = /user is controlling|user controls|用户.*控制|not assigned to an agent|task space.*inactive/i.test(detail);
+  const userControl = /user (?:has|had) taken control|user took control|user is controlling|user controls|用户.*控制|not assigned to an agent|task space.*inactive/i.test(detail);
   if (execution.code === 0 && detail) {
     console.error(detail);
     throw error;

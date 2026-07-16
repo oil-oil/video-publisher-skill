@@ -26,6 +26,19 @@ Both same-target resume and a real foreign-draft save/clean-page flow passed liv
 
 A separate 533 MB fault test terminated the orchestrator while Bilibili was actively uploading. The same task space resumed with upload action mode `resume_existing`, completed without another file injection, and independently reached `READY`.
 
+## Upload Entry Recovery
+
+The current task-space tab may remain on another authenticated `member.bilibili.com` page that has no upload input. Treat this as a bounded page-readiness state, not immediate selector drift:
+
+1. Wait for the target, an active upload, a restore banner, or the real upload input.
+2. After six failed probes, navigate to the exact maintained upload URL once, only when no uploaded draft owns the page.
+3. Re-arm the final-publish guard because full navigation replaces the guarded document.
+4. Activate and focus the new page lifecycle before accepting its input.
+5. Scope the file input to `.bcc-upload-wrapper`; ignore detached 1×1 video inputs elsewhere in the document.
+6. Require upload progress or completed target evidence within 20 seconds after injection.
+
+This flow was reproduced from the authenticated creator home page with zero video inputs. A hidden navigated page accepted a 93 MB file into `input.files` but did not start the upload component. The same clean page started immediately after lifecycle activation and reached `上传完成`. A later full recovery run recorded one navigation, reused the matching restored target without reinjection, and preserved the armed final-publish guard.
+
 ## Metadata And Declarations
 
 Set and independently verify:
@@ -58,6 +71,8 @@ Add missing tags one at a time using real focus, CDP text insertion, and real En
 Critical rule: if the tag input is already empty, do not press Backspace; Bilibili interprets it as deleting the last committed chip.
 
 The final tag set must contain every requested chip, no duplicate/malformed chip, and no unapproved extra chip.
+
+If Bilibili reports that a requested tag is topic-only and cannot be added as a custom tag, preserve a typed metadata blocker. Continue independent cover repair so one rejected tag does not leave the rest of the draft unfinished. Do not silently drop or replace the requested tag.
 
 ## Custom Cover
 

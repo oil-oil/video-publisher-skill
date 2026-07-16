@@ -49,6 +49,8 @@ For ordinary video and image inputs, expose the platform’s existing input and 
 
 Bilibili video inputs declare extensions such as `.mp4,.mov`; do not identify them by searching only for `video` in `accept`. Image inputs must have explicit image MIME/extensions and should be scoped to the active cover editor.
 
+Bilibili may keep detached 1×1 video inputs next to the active uploader. Scope upload to `.bcc-upload-wrapper input[type=file]`. When recovery navigates from another creator page to the upload URL, re-arm the final-publish guard and activate the new page lifecycle before exposing the input. A hidden navigated page was observed accepting the file into `input.files` without starting the upload component. Require visible upload progress or completed target evidence within 20 seconds after injection.
+
 WeChat Channels is different: both its hidden video input and cover image input live in Wujie/open-root content. Find the real input across roots, get its remote object id, then call `DOM.setFileInputFiles`. The top-document `uploadFile('#selector', path)` helper cannot reach an id placed inside that shadow tree.
 
 ```js

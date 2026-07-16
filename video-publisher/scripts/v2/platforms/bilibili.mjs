@@ -31,7 +31,7 @@ async function inspectBilibili() {
   return {gates:{
     authenticated:state.loginRequired?failedGate({loginRequired:true}):okGate({url:PLATFORM_URLS.bilibili}),
     draftIdentity:state.identityMatches?okGate({filenameVisible:state.filenameVisible,title:state.title}):failedGate({foreign:true,title:state.title,expectedName:bilibiliVideoName}),
-    video:state.uploaded&&!state.uploading&&!state.failed?okGate({filename:bilibiliVideoName,stable:true}):failedGate({uploaded:state.uploaded,uploading:state.uploading,failed:state.failed,restoreBanner:state.restoreBanner}),
+    video:state.uploaded&&!state.uploading&&!state.failed?okGate({filename:bilibiliVideoName,stable:true,anyUploaded:state.anyUploaded,filenameVisible:state.filenameVisible}):failedGate({uploaded:state.uploaded,uploading:state.uploading,failed:state.failed,restoreBanner:state.restoreBanner,anyUploaded:state.anyUploaded,filenameVisible:state.filenameVisible}),
     title:state.title===bilibiliTitle?okGate({expected:bilibiliTitle,actual:state.title}):failedGate({expected:bilibiliTitle,actual:state.title}),
     description:state.desc===compactText(bilibiliDescription)?okGate({expected:bilibiliDescription,actual:state.desc}):failedGate({expected:bilibiliDescription,actual:state.desc}),
     tags:state.missing.length===0&&state.malformed.length===0&&state.duplicates.length===0&&state.unexpected.length===0?okGate({requested:bilibiliTags,chips:state.chips,allowedAuto:bilibiliAllowedAutoTags}):failedGate({requested:bilibiliTags,chips:state.chips,missing:state.missing,malformed:state.malformed,duplicates:state.duplicates,unexpected:state.unexpected,allowedAuto:bilibiliAllowedAutoTags}),
@@ -44,9 +44,106 @@ async function inspectBilibili() {
 
 async function resumeBilibiliLocalDraftIfPresent(){return await js(String.raw`(() => {const c=v=>String(v||'').replace(/\s+/g,' ').trim();const button=[...document.querySelectorAll('button,[role="button"],div,span')].find(el=>c(el.innerText||el.textContent||'')==='继续编辑'&&el.getBoundingClientRect().width>10);if(!button)return {ok:true,skipped:true};button.click();return {ok:true,clicked:true}})()`)}
 
-async function waitBilibiliUploadCompletion(mode){let stableSince=0;for(let i=0;i<180;i+=1){const current=await inspectBilibili();if(current.gates.video.ok){if(!stableSince)stableSince=Date.now();if(Date.now()-stableSince>=10000)return {...current,actions:{upload:{mode}}}}else stableSince=0;await wait(5)}const after=await inspectBilibili();return {...after,actions:{upload:{mode}},blocker:typedBlocker('UPLOAD_STALLED','B站视频没有在等待窗口内稳定完成',{retryable:true,evidence:after.gates.video.evidence})}}
+async function activateBilibiliUploadLifecycle(){
+  await cdp('Page.bringToFront',{});
+  await cdp('Page.setWebLifecycleState',{state:'active'});
+  await cdp('Emulation.setFocusEmulationEnabled',{enabled:true});
+  return await js(String.raw`(() => ({url:location.href,readyState:document.readyState,visibilityState:document.visibilityState,hasFocus:document.hasFocus()}))()`);
+}
 
-async function uploadBilibili(){let before=await inspectBilibili();if(before.gates.video.ok)return {...before,actions:{upload:{mode:'already_ready'}}};if(before.gates.video.evidence?.restoreBanner){await resumeBilibiliLocalDraftIfPresent();await wait(3);before=await inspectBilibili();if(before.gates.video.ok)return {...before,actions:{upload:{mode:'already_ready'}}};}if(!before.gates.draftIdentity.ok)return {...before,blocker:typedBlocker('FOREIGN_DRAFT','B站当前编辑器属于其他视频草稿',{retryable:true,evidence:before.gates.draftIdentity.evidence})};if(before.gates.video.evidence?.uploading===true)return await waitBilibiliUploadCompletion('resume_existing');const exposed=await js(String.raw`(() => {const input=[...document.querySelectorAll('input[type=file]')].find(el=>/\.(mp4|flv|avi|wmv|mov|webm|mkv|m4v|ts|mpg|rmvb)\b/i.test(el.accept||''));if(!input)return {ok:false,reason:'bilibili video input missing'};input.id='vp2-bili-video';return {ok:true,selector:'#vp2-bili-video'}})()`);if(!exposed.ok)return {...before,blocker:typedBlocker('SELECTOR_DRIFT',exposed.reason)};try{await uploadFile(exposed.selector,videoPath)}catch(error){return {...before,blocker:typedBlocker('UPLOAD_NOT_STARTED',String(error?.message||error),{retryable:true})}}return await waitBilibiliUploadCompletion('injected')}
+async function exposeBilibiliVideoInput(){
+  return await js(String.raw`(() => {
+    const compact=value=>String(value||'').replace(/\s+/g,' ').trim();
+    const videoLike=el=>/\.(mp4|flv|avi|wmv|mov|webm|mkv|m4v|ts|mpg|rmvb)\b/i.test(el.accept||'');
+    for(const stale of document.querySelectorAll('#vp2-bili-video'))stale.removeAttribute('id');
+    const input=[...document.querySelectorAll('.bcc-upload-wrapper input[type=file]')].find(videoLike);
+    const evidence={url:location.href,readyState:document.readyState,visibilityState:document.visibilityState,hasFocus:document.hasFocus(),bodySample:compact(document.body?.innerText||'').slice(0,280)};
+    if(!input)return {ok:false,reason:'bilibili video input missing',...evidence};
+    input.id='vp2-bili-video';
+    const parentRect=input.parentElement?.getBoundingClientRect();
+    return {ok:true,selector:'#vp2-bili-video',accept:input.accept||'',parentWidth:Math.round(parentRect?.width||0),parentHeight:Math.round(parentRect?.height||0),...evidence};
+  })()`);
+}
+
+async function waitForBilibiliUploadEntry(){
+  const probes=[];
+  let navigationAttempts=0;
+  let restoreAttempts=0;
+  for(let attempt=1;attempt<=24;attempt+=1){
+    if(attempt===1||attempt%4===0)await activateBilibiliUploadLifecycle();
+    const current=await inspectBilibili();
+    const videoEvidence=current.gates.video.evidence||{};
+    if(!current.gates.authenticated.ok){
+      return {kind:'blocked',current,blocker:typedBlocker('AUTH_REQUIRED','B站登录状态失效',{requiresUser:true,evidence:current.gates.authenticated.evidence}),recovery:{attempt,navigationAttempts,restoreAttempts,probes:probes.slice(-8)}};
+    }
+    if(current.gates.video.ok)return {kind:'ready',current,recovery:{attempt,navigationAttempts,restoreAttempts,probes:probes.slice(-8)}};
+    if(videoEvidence.restoreBanner){
+      if(restoreAttempts<2){
+        const resumed=await resumeBilibiliLocalDraftIfPresent();
+        restoreAttempts+=1;
+        probes.push({attempt,action:'resume_local_draft',ok:resumed.ok,clicked:resumed.clicked===true});
+        if(!resumed.ok)return {kind:'blocked',current,blocker:typedBlocker('ACTION_FAILED',resumed.reason||'B站本地草稿恢复失败',{retryable:true,evidence:resumed}),recovery:{attempt,navigationAttempts,restoreAttempts,probes:probes.slice(-8)}};
+      }
+      await wait(2);
+      continue;
+    }
+    if(!current.gates.draftIdentity.ok){
+      return {kind:'blocked',current,blocker:typedBlocker('FOREIGN_DRAFT','B站当前编辑器属于其他视频草稿',{retryable:true,evidence:current.gates.draftIdentity.evidence}),recovery:{attempt,navigationAttempts,restoreAttempts,probes:probes.slice(-8)}};
+    }
+    if(videoEvidence.uploading===true)return {kind:'uploading',current,recovery:{attempt,navigationAttempts,restoreAttempts,probes:probes.slice(-8)}};
+    let exposed=await exposeBilibiliVideoInput();
+    if(exposed.ok&&(exposed.visibilityState!=='visible'||exposed.hasFocus!==true)){
+      await activateBilibiliUploadLifecycle();
+      exposed=await exposeBilibiliVideoInput();
+    }
+    probes.push({attempt,ok:exposed.ok,url:exposed.url,readyState:exposed.readyState,visibilityState:exposed.visibilityState,hasFocus:exposed.hasFocus,reason:exposed.reason||null});
+    if(exposed.ok)return {kind:'input',current,exposed,recovery:{attempt,navigationAttempts,restoreAttempts,probes:probes.slice(-8)}};
+    if(attempt===6&&navigationAttempts===0&&videoEvidence.anyUploaded!==true){
+      navigationAttempts+=1;
+      probes.push({attempt,action:'navigate_upload_url',url:PLATFORM_URLS.bilibili});
+      await gotoAndWait(PLATFORM_URLS.bilibili,{timeout:45,settle:2});
+      const guard=await armFinalPublishGuard();
+      if(!guard.ok||!guard.armed){
+        const currentAfterNavigation=await inspectBilibili();
+        return {kind:'blocked',current:currentAfterNavigation,blocker:typedBlocker('INPUT_CHANNEL_BROKEN','B站定向恢复后无法重新挂载最终发布保护',{retryable:true,evidence:guard}),recovery:{attempt,navigationAttempts,restoreAttempts,probes:probes.slice(-8)}};
+      }
+      await activateBilibiliUploadLifecycle();
+      await wait(2);
+      continue;
+    }
+    await wait(2);
+  }
+  const current=await inspectBilibili();
+  const recovery={attempt:24,navigationAttempts,restoreAttempts,probes:probes.slice(-8)};
+  return {kind:'blocked',current,blocker:typedBlocker('SELECTOR_DRIFT','B站上传页在等待和一次定向恢复后仍未出现真实视频输入框',{retryable:true,evidence:recovery}),recovery};
+}
+
+async function waitBilibiliUploadCompletion(mode,entryRecovery=null){let stableSince=0;for(let i=0;i<180;i+=1){const current=await inspectBilibili();if(current.gates.video.ok){if(!stableSince)stableSince=Date.now();if(Date.now()-stableSince>=10000)return {...current,actions:{upload:{mode,entryRecovery}}}}else stableSince=0;await wait(5)}const after=await inspectBilibili();return {...after,actions:{upload:{mode,entryRecovery}},blocker:typedBlocker('UPLOAD_STALLED','B站视频没有在等待窗口内稳定完成',{retryable:true,evidence:after.gates.video.evidence})}}
+
+async function waitForBilibiliUploadStart(){
+  for(let attempt=1;attempt<=20;attempt+=1){
+    const current=await inspectBilibili();
+    if(current.gates.video.ok||current.gates.video.evidence?.uploading===true)return {ok:true,current,attempt};
+    if(current.gates.video.evidence?.failed===true)return {ok:false,current,attempt,reason:'B站在文件注入后报告上传失败'};
+    await wait(1);
+  }
+  const current=await inspectBilibili();
+  return {ok:false,current,attempt:20,reason:'B站在文件注入后 20 秒内没有进入上传状态'};
+}
+
+async function uploadBilibili(){
+  const entry=await waitForBilibiliUploadEntry();
+  if(entry.kind==='blocked')return {...entry.current,uploadEntryRecovery:entry.recovery,blocker:entry.blocker};
+  if(entry.kind==='ready')return {...entry.current,actions:{upload:{mode:'already_ready',entryRecovery:entry.recovery}}};
+  if(entry.kind==='uploading')return await waitBilibiliUploadCompletion('resume_existing',entry.recovery);
+  await activateBilibiliUploadLifecycle();
+  const liveExposed=await exposeBilibiliVideoInput();
+  if(!liveExposed.ok)return {...entry.current,uploadEntryRecovery:entry.recovery,blocker:typedBlocker('UPLOAD_NOT_STARTED',liveExposed.reason,{retryable:true,evidence:liveExposed})};
+  try{await uploadFile(liveExposed.selector,videoPath)}catch(error){return {...entry.current,uploadEntryRecovery:entry.recovery,blocker:typedBlocker('UPLOAD_NOT_STARTED',String(error?.message||error),{retryable:true,evidence:liveExposed})}}
+  const started=await waitForBilibiliUploadStart();
+  if(!started.ok)return {...started.current,actions:{upload:{mode:'injected',entryRecovery:entry.recovery}},blocker:typedBlocker('UPLOAD_NOT_STARTED',started.reason,{retryable:true,evidence:{attempt:started.attempt,video:started.current.gates.video.evidence,liveExposed}})};
+  return await waitBilibiliUploadCompletion('injected',entry.recovery);
+}
 
 async function setBilibiliDescriptionV2(){return await js(String.raw`((value) => {const editor=[...document.querySelectorAll('.ql-editor[contenteditable="true"]')].find(el=>/ql-editor/.test(String(el.className||'')));if(!editor)return {ok:false,reason:'bilibili description editor missing'};editor.focus();const sel=window.getSelection(),range=document.createRange();range.selectNodeContents(editor);sel.removeAllRanges();sel.addRange(range);document.execCommand('delete',false);document.execCommand('insertText',false,value);editor.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:value}));editor.dispatchEvent(new Event('change',{bubbles:true}));return {ok:String(editor.innerText||editor.textContent||'').replace(/\s+/g,' ').trim()===String(value).replace(/\s+/g,' ').trim(),actual:editor.innerText||''}})(${JSON.stringify(bilibiliDescription)})`)}
 
@@ -129,7 +226,32 @@ async function uploadBilibiliCoverV2(){
   return {ok:true,frameworkFallbackUsed,primaryClickError,receipt:{assetPath:bilibiliCoverPath,ratio:'4:3',beforeUrls:before,afterUrl}};
 }
 
-async function mutateBilibili(){const before=await inspectBilibili();if(!before.gates.video.ok)return {...before,blocker:typedBlocker('STATE_AMBIGUOUS','B站没有可修复的已上传视频')};const actions={};if(!before.gates.title.ok)actions.title=await setNativeInputValue('input[placeholder*="稿件标题"]',bilibiliTitle);if(!before.gates.description.ok)actions.description=await setBilibiliDescriptionV2();if(actions.description&&!actions.description.ok)return {...(await inspectBilibili()),blocker:typedBlocker('ACTION_FAILED',actions.description.reason)};if(!before.gates.original.ok)actions.declaration=await ensureBilibiliDeclarationV2();if(actions.declaration&&!actions.declaration.ok)return {...(await inspectBilibili()),blocker:typedBlocker('ACTION_FAILED','B站创作声明没有持久化',{evidence:actions.declaration})};if(!before.gates.tags.ok){actions.tags=await rebuildBilibiliTagsV2();if(!actions.tags.ok)return {...(await inspectBilibili()),blocker:typedBlocker('PLATFORM_REJECTED_METADATA',actions.tags.reason,{retryable:true,evidence:actions.tags})}}const receipts={};if(bilibiliCustomCover){actions.cover=await uploadBilibiliCoverV2();if(!actions.cover.ok)return {...(await inspectBilibili()),blocker:typedBlocker('PLATFORM_REJECTED_ASSET',actions.cover.reason,{retryable:true,evidence:actions.cover})};receipts.cover=actions.cover.receipt;expectedReceipts.cover=receipts.cover}actions.receiptCheckpoint=checkpointReceipts(receipts);const after=await inspectBilibili();return {...after,actions,receipts}}
+async function mutateBilibili(){
+  const before=await inspectBilibili();
+  if(!before.gates.video.ok)return {...before,blocker:typedBlocker('STATE_AMBIGUOUS','B站没有可修复的已上传视频')};
+  const actions={};
+  const mutationBlockers=[];
+  if(!before.gates.title.ok)actions.title=await setNativeInputValue('input[placeholder*="稿件标题"]',bilibiliTitle);
+  if(!before.gates.description.ok)actions.description=await setBilibiliDescriptionV2();
+  if(actions.description&&!actions.description.ok)return {...(await inspectBilibili()),blocker:typedBlocker('ACTION_FAILED',actions.description.reason)};
+  if(!before.gates.original.ok)actions.declaration=await ensureBilibiliDeclarationV2();
+  if(actions.declaration&&!actions.declaration.ok)return {...(await inspectBilibili()),blocker:typedBlocker('ACTION_FAILED','B站创作声明没有持久化',{evidence:actions.declaration})};
+  if(!before.gates.tags.ok){
+    actions.tags=await rebuildBilibiliTagsV2();
+    if(!actions.tags.ok)mutationBlockers.push(typedBlocker('PLATFORM_REJECTED_METADATA',actions.tags.reason,{retryable:true,evidence:actions.tags}));
+  }
+  const receipts={};
+  if(bilibiliCustomCover&&!before.gates.cover.ok){
+    actions.cover=await uploadBilibiliCoverV2();
+    if(!actions.cover.ok)mutationBlockers.push(typedBlocker('PLATFORM_REJECTED_ASSET',actions.cover.reason,{retryable:true,evidence:actions.cover}));
+    else{receipts.cover=actions.cover.receipt;expectedReceipts.cover=receipts.cover}
+  }else if(bilibiliCustomCover){
+    actions.cover={ok:true,skipped:true,reason:'already_verified'};
+  }
+  actions.receiptCheckpoint=checkpointReceipts(receipts);
+  const after=await inspectBilibili();
+  return {...after,actions,receipts,mutationBlockers,blocker:mutationBlockers[0]||null};
+}
 
 async function quarantineBilibili(){let before=await inspectBilibili();if(before.gates.video.evidence?.restoreBanner){const resumed=await resumeBilibiliLocalDraftIfPresent();if(!resumed.ok)return {...before,blocker:typedBlocker('ACTION_FAILED',resumed.reason)};await wait(4);before=await inspectBilibili();if(before.gates.draftIdentity.ok)return {...before,quarantine:{safeToUpload:true,resumedTarget:true}}}if(before.gates.draftIdentity.ok)return {...before,quarantine:{safeToUpload:!before.gates.video.ok,skipped:true}};const saved=await js(String.raw`(() => {const c=v=>String(v||'').replace(/\s+/g,' ').trim();const button=[...document.querySelectorAll('button,[role="button"],div,span')].find(el=>c(el.innerText||el.textContent||'')==='存草稿'&&el.getBoundingClientRect().width>20);if(!button)return {ok:false,reason:'bilibili save-draft button missing'};button.click();return {ok:true}})()`);if(!saved.ok)return {...before,blocker:typedBlocker('ACTION_FAILED',saved.reason)};await wait(4);await gotoAndWait(PLATFORM_URLS.bilibili,{timeout:45,settle:2});await wait(3);const after=await inspectBilibili();const safe=!after.gates.video.ok&&after.gates.draftIdentity.ok;return {...after,quarantine:{safeToUpload:safe,saved:true},blocker:safe?null:typedBlocker('STATE_AMBIGUOUS','B站旧草稿保存后没有回到干净上传页',{retryable:true})}}
 

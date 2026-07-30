@@ -2,11 +2,15 @@
 
 Read `platform-common.md` and `ego-browser-workflow.md` first.
 
+## Contents
+
+- Acceptance boundary and Wujie lifecycle
+- Upload completion and draft identity
+- Text, original declaration, custom covers, and required gates
+
 ## Current Acceptance Boundary
 
-As of 2026-07-14, the platform-specific path passed real runs for upload completion, exact description, empty short title, original declaration, 3:4 personal-profile and 4:3 share-card custom covers, no blocking dialog, enabled `发表`, and `finalPublishClicked: false`. Stale cover-editor recovery was also exercised by a real retry.
-
-The remaining system-level boundary is the four-platform production-orchestrator regression described in the root Skill.
+As of 2026-07-16, the platform-specific path and full production orchestrator passed upload completion, exact description, empty short title, original declaration, 3:4 personal-profile and 4:3 share-card custom covers, stale cover-editor recovery, task-space replacement, no blocking dialog, enabled `发表`, and `finalPublishClicked: false`.
 
 ## Wujie Lifecycle
 
@@ -50,7 +54,7 @@ A later 534 MB run deleted the ready WeChat Channels task space. The same job cr
 
 ## Draft Identity
 
-The page does not expose a reliable filename. Reuse an uploaded draft only when the description is empty or matches the expected package. A different non-empty description is foreign and must block.
+The page does not expose a reliable filename. Reuse an uploaded draft only when its description exactly matches the expected package, or a package-fingerprint and task-space receipt proves this job injected or resumed that upload. Treat an already uploaded draft with an empty description and no matching receipt as `STATE_AMBIGUOUS`; never fill its metadata or declarations. A different non-empty description is foreign and must block.
 
 ## Text Defaults
 

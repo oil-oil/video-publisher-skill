@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   coverAssetsForPlatform,
   readPackage,
+  validateBilibiliPackage,
   validateDouyinPackage,
   validateXiaohongshuPackage,
 } from "../lib/content-package.mjs";
@@ -98,6 +99,66 @@ test("an existing cover asset needs only its file path and ratio", async () => {
   });
 });
 
+test("Bilibili maps and validates only the dedicated 16:10 cover", async () => {
+  await withTempDir(async root => {
+    const bilibiliCoverPath = path.join(root, "cover-16x10.png");
+    const oldLandscapePath = path.join(root, "cover-4x3.png");
+    const packagePath = path.join(root, "package.json");
+    await fs.promises.writeFile(bilibiliCoverPath, pngHeader(1280, 800));
+    await fs.promises.writeFile(oldLandscapePath, pngHeader(1440, 1080));
+    await fs.promises.writeFile(packagePath, JSON.stringify({
+      title: "Bilibili cover test",
+      bilibiliDescription: "Description",
+      bilibiliTags: ["Test"],
+      cover: {
+        uploadCustomCover: true,
+        horizontal4x3Path: oldLandscapePath,
+        horizontal16x10Path: bilibiliCoverPath,
+      },
+    }));
+    const pkg = readPackage(packagePath, { config: defaultConfig() });
+    assert.deepEqual(validateBilibiliPackage(pkg), []);
+    assert.deepEqual(coverAssetsForPlatform(pkg, "bilibili"), [
+      { slot: "landscape", ratio: "16:10", path: bilibiliCoverPath },
+    ]);
+
+    await fs.promises.writeFile(packagePath, JSON.stringify({
+      title: "Bilibili cover test",
+      bilibiliDescription: "Description",
+      bilibiliTags: ["Test"],
+      cover: {
+        uploadCustomCover: true,
+        horizontal4x3Path: oldLandscapePath,
+      },
+    }));
+    const oldOnlyPackage = readPackage(packagePath, { config: defaultConfig() });
+    assert.deepEqual(coverAssetsForPlatform(oldOnlyPackage, "bilibili"), []);
+    assert.match(
+      validateBilibiliPackage(oldOnlyPackage).join("; "),
+      /no cover asset is mapped for bilibili/,
+    );
+  });
+});
+
+test("Bilibili rejects a 4:3 image in the dedicated 16:10 cover field", async () => {
+  await withTempDir(async root => {
+    const wrongCoverPath = path.join(root, "cover-4x3.png");
+    const packagePath = path.join(root, "package.json");
+    await fs.promises.writeFile(wrongCoverPath, pngHeader(1440, 1080));
+    await fs.promises.writeFile(packagePath, JSON.stringify({
+      title: "Bilibili cover test",
+      bilibiliDescription: "Description",
+      bilibiliTags: ["Test"],
+      cover: {
+        uploadCustomCover: true,
+        horizontal16x10Path: wrongCoverPath,
+      },
+    }));
+    const errors = validateBilibiliPackage(readPackage(packagePath, { config: defaultConfig() }));
+    assert.match(errors.join("; "), /expected 16:10, got 1440x1080/);
+  });
+});
+
 test("account defaults fill only fields omitted from the package", async () => {
   await withTempDir(async root => {
     const packagePath = path.join(root, "package.json");
@@ -114,6 +175,46 @@ test("account defaults fill only fields omitted from the package", async () => {
     const pkg = readPackage(packagePath, { config });
     assert.deepEqual(pkg.douyinTopics, ["Default topic"]);
     assert.deepEqual(pkg.bilibiliAllowedAutoTags, ["Platform tag"]);
+  });
+});
+
+test("platform-specific titles are validated with Unicode code points", async () => {
+  await withTempDir(async root => {
+    const packagePath = path.join(root, "package.json");
+    await fs.promises.writeFile(packagePath, JSON.stringify({
+      title: "Generic",
+      bilibiliTitle: "长".repeat(81),
+      bilibiliDescription: "Description",
+      bilibiliTags: ["Test"],
+      xhsTitle: "😀".repeat(20),
+      xhsTopics: ["Test"],
+    }));
+    const pkg = readPackage(packagePath, { config: defaultConfig() });
+    assert.match(validateBilibiliPackage(pkg).join("; "), /bilibili title is 81\/80/);
+    assert.deepEqual(validateXiaohongshuPackage(pkg), []);
+
+    await fs.promises.writeFile(packagePath, JSON.stringify({
+      title: "通".repeat(81),
+      bilibiliTitle: "Valid Bilibili title",
+      bilibiliDescription: "Description",
+      bilibiliTags: ["Test"],
+    }));
+    assert.deepEqual(validateBilibiliPackage(readPackage(packagePath, { config: defaultConfig() })), []);
+  });
+});
+
+test("Xiaohongshu topics reject the unsupported half-width dot before browser work", async () => {
+  await withTempDir(async root => {
+    const packagePath = path.join(root, "package.json");
+    await fs.promises.writeFile(packagePath, JSON.stringify({
+      title: "Model guide",
+      xhsTopics: ["Codex", "GPT5.6"],
+    }));
+    const pkg = readPackage(packagePath, { config: defaultConfig() });
+    assert.match(
+      validateXiaohongshuPackage(pkg).join("; "),
+      /xiaohongshu topics do not support "\.".*GPT5\.6/,
+    );
   });
 });
 
@@ -137,5 +238,17 @@ test("Douyin preflight accepts 15:00 container rounding and rejects longer media
     assert.deepEqual(validateMediaForPlatform({ videoPath: acceptedPath }, "douyin"), []);
     assert.match(validateMediaForPlatform({ videoPath: rejectedPath }, "douyin")[0], /DOUYIN_DURATION_LIMIT/);
     assert.deepEqual(validateMediaForPlatform({ videoPath: rejectedPath }, "xiaohongshu"), []);
+  });
+});
+
+test("Douyin preflight fails closed when duration cannot be verified", async () => {
+  await withTempDir(async root => {
+    const unreadableMp4 = path.join(root, "unreadable.mp4");
+    const unsupportedContainer = path.join(root, "sample.mkv");
+    await fs.promises.writeFile(unreadableMp4, "not an ISO BMFF file");
+    await fs.promises.writeFile(unsupportedContainer, "not an ISO BMFF file");
+    assert.match(validateMediaForPlatform({ videoPath: unreadableMp4 }, "douyin")[0], /DOUYIN_DURATION_UNVERIFIED/);
+    assert.match(validateMediaForPlatform({ videoPath: unsupportedContainer }, "douyin")[0], /DOUYIN_DURATION_UNVERIFIED/);
+    assert.deepEqual(validateMediaForPlatform({ videoPath: unsupportedContainer }, "bilibili"), []);
   });
 });

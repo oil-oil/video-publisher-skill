@@ -15,7 +15,7 @@ no prose body unless explicitly requested
 
 Use the confirmed video file. Reuse an uploaded editor only when the filename or expected title identifies this package. A different active draft is a blocker; Xiaohongshu has no tested automatic quarantine flow.
 
-Do not mutate metadata until the upload phase has fully completed and every selected platform upload runner has exited.
+Do not mutate metadata until Xiaohongshu itself has fully completed the upload. Once that is proven, it may enter the single rolling post-upload queue immediately; another platform's slow or blocked upload is not a Xiaohongshu prerequisite.
 
 ## Topic Entities
 
@@ -26,6 +26,8 @@ Under sustained browser load, the decoration may appear while the candidate pane
 After an Ego restart, the selected Xiaohongshu tab may report `document.visibilityState: hidden` even though its DOM is readable. Hidden-page timer throttling can delay a real topic candidate response far beyond the bounded wait. Immediately before a serialized topic rebuild, bring the page to front, set its web lifecycle to `active`, enable focus emulation, and prove `visible` plus `document.hasFocus()`. Do not add longer blind waits to compensate for a hidden lifecycle.
 
 Spaces terminate Xiaohongshu topic input. When a readable package label contains whitespace, query the compact form (for example `AI Agent` -> `AIAgent`) and accept it only when the committed entity's `data-topic.name`, normalized without whitespace, matches the requested label. Preserve the readable package label in evidence. Never accept compact plain text as a substitute for an entity.
+
+Xiaohongshu topic entities do not support the half-width dot `.`. Reject any dotted `xhsTopics` label during package preflight instead of opening the creator page or silently rewriting the label. Use an explicitly chosen dot-free label such as `GPT56` when that still represents the intended topic.
 
 The verifier must prove:
 
@@ -61,8 +63,8 @@ exact topic entities with no plain residue
 原创声明 enabled
 custom 3:4 receipt when enabled, otherwise default cover state
 no blocking dialog
-visible enabled 发布 button
-visible enabled `发布笔记` final button; final publish not clicked
+one visible enabled final control labeled `发布` or `发布笔记`
+final publish not clicked
 ```
 
 This path passed real draft runs on 2026-07-14 and 2026-07-15. The visible-tab polling path was fault-tested by discarding the receipt and re-uploading the same 3:4 asset. Later 731 MB and 533 MB runs survived orchestrator termination during upload without reinjection, and the 533 MB run verified whitespace-normalized topic lookup plus three no-op full reruns. Real Ego Lite crash/restart and sustained-load runs reproduced both the cold-page topic-decoration failure and an empty candidate panel. A mutation-stage crash finally proved the persistent failure was hidden lifecycle throttling: activating and focusing that exact failed page made its next bounded whole-set rebuild commit four entities on attempt one. The 3:4 receipt and four-platform `READY` state were restored, followed by three full no-op reruns.

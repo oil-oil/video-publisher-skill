@@ -6,6 +6,7 @@ import {
   ORIGINALITY_POLICIES,
   configStatus,
   createOnboardedConfig,
+  loadConfig,
   resolveConfigPath,
   writeConfig,
 } from "./lib/config.mjs";
@@ -20,6 +21,7 @@ function usage() {
     "  node scripts/config.mjs status",
     "  node scripts/config.mjs validate",
     "  node scripts/config.mjs onboard --source-dir <path> [options]",
+    "  node scripts/config.mjs add-platform <platform> [--default] [platform options]",
     "",
     "Repeatable options:",
     "  --available-platform <xiaohongshu|douyin|bilibili|wechat_channels>",
@@ -35,13 +37,14 @@ function usage() {
     "  --check-concurrency <integer>",
     "  --upload-concurrency <integer>",
     "  --upload-existing-cover-by-default",
+    "  --default  Add the platform to defaultPlatforms as well",
   ].join("\n");
 }
 
 function parseOptions(argv) {
   const repeatable = new Set(["--available-platform", "--platform", "--recurring-tag", "--douyin-topic", "--bilibili-auto-tag"]);
   const single = new Set(["--source-dir", "--locale", "--copy-style", "--originality-policy", "--check-concurrency", "--upload-concurrency"]);
-  const boolean = new Set(["--upload-existing-cover-by-default"]);
+  const boolean = new Set(["--upload-existing-cover-by-default", "--default"]);
   const result = {};
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
@@ -75,8 +78,39 @@ try {
     const status = configStatus(configPath);
     print(status);
     if (status.onboardingRequired || status.warnings.length) process.exitCode = 1;
+  } else if (command === "add-platform") {
+    const [platform, ...optionArgs] = argv;
+    if (!CONFIG_PLATFORMS.includes(platform)) throw new Error(`unsupported available platform: ${platform || "(missing)"}`);
+    const options = parseOptions(optionArgs);
+    const disallowed = Object.keys(options).filter(flag => !["--default", "--douyin-topic", "--bilibili-auto-tag"].includes(flag));
+    if (disallowed.length) throw new Error(`unsupported add-platform option: ${disallowed.join(", ")}`);
+    if (options["--douyin-topic"]?.length && platform !== "douyin") throw new Error("--douyin-topic is valid only when adding douyin");
+    if (options["--bilibili-auto-tag"]?.length && platform !== "bilibili") throw new Error("--bilibili-auto-tag is valid only when adding bilibili");
+    const current = loadConfig({ configPath, requireOnboarded: true });
+    const updated = {
+      ...current,
+      onboarding: { ...current.onboarding, updatedAt: new Date().toISOString() },
+      availablePlatforms: [...new Set([...current.availablePlatforms, platform])],
+      defaultPlatforms: options["--default"]
+        ? [...new Set([...current.defaultPlatforms, platform])]
+        : [...current.defaultPlatforms],
+      platforms: {
+        ...current.platforms,
+        douyin: {
+          ...current.platforms.douyin,
+          ...(options["--douyin-topic"] ? { defaultTopics: options["--douyin-topic"] } : {}),
+        },
+        bilibili: {
+          ...current.platforms.bilibili,
+          ...(options["--bilibili-auto-tag"] ? { allowedAutoTags: options["--bilibili-auto-tag"] } : {}),
+        },
+      },
+    };
+    writeConfig(updated, configPath);
+    print(configStatus(configPath));
   } else if (command === "onboard") {
     const options = parseOptions(argv);
+    if (options["--default"]) throw new Error("--default is valid only with add-platform");
     const sourceDirectory = path.resolve(String(options["--source-dir"] || ""));
     if (!options["--source-dir"]) throw new Error("--source-dir is required");
     if (!fs.existsSync(sourceDirectory) || !fs.statSync(sourceDirectory).isDirectory()) {

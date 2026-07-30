@@ -2,6 +2,13 @@
 
 Keep personal defaults outside the shareable Skill directory.
 
+## Contents
+
+- Resolution and onboarding gate
+- Onboarding conversation and command
+- Non-destructive platform addition
+- Schema, migration, precedence, and privacy
+
 ## Resolution And Gate
 
 Resolve the configuration in this order:
@@ -12,7 +19,7 @@ $XDG_CONFIG_HOME/video-publisher/config.json
 $HOME/.config/video-publisher/config.json
 ```
 
-Run `node scripts/config.mjs status` at the start of every Skill invocation. Missing, empty, invalid, unsupported-schema, or incomplete configuration sets `onboardingRequired: true`. Do not inspect creator pages until onboarding is complete.
+Run `node scripts/config.mjs status` at the start of every publishing, recovery, or live-browser diagnosis flow. Static Skill review, documentation work, and local tests do not read personal configuration. Missing, empty, invalid, unsupported-schema, or incomplete configuration sets `onboardingRequired: true`. Do not inspect creator pages until onboarding is complete.
 
 Warnings such as a missing source directory do not erase onboarding, but repair or explicitly override that directory before using it.
 
@@ -59,6 +66,20 @@ node scripts/config.mjs validate
 
 Continue only after it exits successfully.
 
+The onboarding command also supports `--locale`, `--copy-style`, `--check-concurrency`, `--upload-concurrency`, and `--upload-existing-cover-by-default`. Include the values confirmed in the onboarding summary instead of relying on hidden defaults.
+
+## Add An Available Platform
+
+Do not rerun `onboard` merely to add an account; onboarding rebuilds a complete profile. After the user confirms the additional account, merge it without changing existing preferences:
+
+```bash
+node scripts/config.mjs add-platform douyin \
+  --default \
+  --douyin-topic "Tutorial"
+```
+
+Omit `--default` when the account should be available only for explicit runs. When adding Bilibili, use repeatable `--bilibili-auto-tag` only for exact platform-generated tags the user approves. The command preserves the source directory, copy style, recurring tags, originality policy, concurrency, cover preference, and all unrelated platform settings.
+
 ## Schema
 
 ```json
@@ -101,7 +122,7 @@ Validation requires:
 - every default platform to be available;
 - only supported platform identifiers.
 
-The production publisher rejects an explicitly requested platform outside `availablePlatforms` before package or browser work. Add a new account through onboarding instead of silently opening an unconfigured creator page.
+The production publisher rejects an explicitly requested platform outside `availablePlatforms` before package or browser work. After confirming the account, use `config.mjs add-platform` instead of silently opening an unconfigured creator page or rebuilding onboarding.
 
 ## Schema 1 Migration
 
@@ -120,4 +141,4 @@ generic Skill default
 
 Configuration may store reusable preferences, declared platform availability, and the explicitly onboarded standing originality policy. `ask_each_run` requires `--confirm-original-rights` for each mutating run; `all_videos_original` allows the maintained workflow to apply truthful original/self-made declarations without asking again. Never infer or silently upgrade this value.
 
-Never persist cookies, tokens, passwords, video-specific paths, or permission to click the final publish control. Platform availability describes declared account capability, not login credentials. Originality policy and final-publish authorization are separate: the latter always requires an explicit current-run instruction.
+Never persist cookies, tokens, passwords, video-specific paths, or final-publish instructions. Platform availability describes declared account capability, not login credentials. Originality policy does not change the no-final-publish boundary; final publishing remains outside this Skill.

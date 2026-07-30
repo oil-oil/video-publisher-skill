@@ -2,7 +2,13 @@
 
 Start from a video link or local file path.
 
-Before intake, read `node scripts/config.mjs status`. Use `sourceDirectory`, `availablePlatforms`, `defaultPlatforms`, `contentProfile`, platform defaults, and cover preference as proposals only. A current user instruction or explicit package field wins within `availablePlatforms`. If the user asks for an unavailable platform, update onboarding and confirm the account before any browser work.
+## Contents
+
+- Video input and content inspection
+- Title, tags, and platform text defaults
+- Proposal and final package
+
+Before intake, run `node scripts/config.mjs status` from the Skill directory and read `content-package.md`. Use `sourceDirectory`, `availablePlatforms`, `defaultPlatforms`, `contentProfile`, platform defaults, and cover preference as proposals only. A current user instruction or explicit package field wins within `availablePlatforms`. If the user asks for an unavailable platform, confirm the account and use `config.mjs add-platform` before browser work.
 
 ## Video Input
 
@@ -13,9 +19,9 @@ If it is an HTTP(S) link, ask before downloading unless the link clearly points 
 If the link points to an already-published creator platform post, treat it as a reference and ask for the source video file before uploading.
 ```
 
-Before any browser upload, verify the local file exists with `ls -lh` or `test -f`, then run `scripts/check-package.mjs` for every selected platform. For Douyin, MP4/M4V/MOV content above the real-tested 15:00 boundary must be rejected before Ego Lite starts; allow at most 0.1 seconds of container-metadata rounding. Ask for a shorter export; never automatically trim or transcode the source. Continue validating the original file for any other selected platforms because this limit is Douyin-specific.
+Before any browser upload, verify the local file exists with `ls -lh` or `test -f`, then run `scripts/check-package.mjs` for every selected platform. For Douyin, require a readable MP4/M4V/MOV duration and fail closed when it cannot be verified. Reject content above 15:00 before Ego Lite starts, allowing at most 0.1 seconds of container-metadata rounding. Ask for a valid shorter export; never automatically trim or transcode the source. Continue validating the original file for other selected platforms because this rule is Douyin-specific.
 
-Before selecting any `原创`, `自制`, or equivalent declaration, require the onboarded `declarations.originalityPolicy` to be `all_videos_original`, or obtain current-video confirmation and pass the one-run `--confirm-original-rights` override. Never infer eligibility from the filename or content. Treat this declaration signal separately from final-publish authorization.
+Before selecting any `原创`, `自制`, or equivalent declaration, require the onboarded `declarations.originalityPolicy` to be `all_videos_original`, or obtain current-video confirmation and pass the one-run `--confirm-original-rights` override. Never infer eligibility from the filename or content. This declaration signal does not change the Skill's no-final-publish boundary.
 
 If the exact path does not exist:
 
@@ -50,6 +56,8 @@ Avoid hard-selling, generic traffic bait, and exaggerated claims.
 
 Tags should usually include 3-7 terms, mixing the subject, audience, product, and workflow when relevant. Treat configured `contentProfile.recurringTags` as candidates, not mandatory tags; include only terms relevant to the current video.
 
+For Xiaohongshu, do not propose topic labels containing the half-width dot `.` because the platform does not support it in topic entities. Choose an explicit dot-free label such as `GPT56` instead of `GPT5.6`.
+
 Douyin accepts 1-5 topic entities. Explicit package topics win; otherwise use configured `platforms.douyin.defaultTopics`. Confirm account campaigns during onboarding rather than embedding them in this Skill.
 
 Neutral examples:
@@ -80,9 +88,11 @@ Map user-supplied cover files this way:
 ```text
 Xiaohongshu: 3:4 portrait
 WeChat Channels: both 3:4 portrait and 4:3 landscape
-Bilibili: 4:3 landscape
+Bilibili: 16:10 landscape
 Douyin: both 3:4 portrait and 4:3 landscape
 ```
+
+When oil-cover outputs are supplied, use `<视频名>_16x10.png` as Bilibili’s `cover.horizontal16x10Path`.
 
 ## Proposal Shape
 
@@ -118,7 +128,7 @@ B站 tags:
 B站允许保留的平台自动 tags: 留空，除非用户明确确认
 视频号描述:
 视频号 tags:
-封面: 使用平台默认封面；若本轮明确要求上传已有封面，则记录所需 3:4/4:3 文件路径
+封面: 使用平台默认封面；若本轮明确要求上传已有封面，则记录所需 3:4/4:3/16:10 文件路径
 平台:
 是否使用字幕版:
 ```

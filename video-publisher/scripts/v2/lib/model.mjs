@@ -43,6 +43,21 @@ export function requiredGates(platform) {
   return [...gates];
 }
 
+export function videoReceiptFromObservation(observation, fingerprint, fallbackTaskSpaceId = null) {
+  const mode = observation?.actions?.upload?.mode;
+  if (!fingerprint
+    || observation?.blocker
+    || observation?.gates?.video?.ok !== true
+    || observation?.gates?.draftIdentity?.ok !== true
+    || !["injected", "resume_existing"].includes(mode)) return null;
+  return {
+    fingerprint,
+    taskSpaceId: observation.taskSpaceId ?? fallbackTaskSpaceId ?? null,
+    mode,
+    observedAt: observation.observedAt || new Date().toISOString(),
+  };
+}
+
 function normalizedBlocker(blocker) {
   if (!blocker) return null;
   if (typeof blocker === "string") {
@@ -121,6 +136,7 @@ export function classifyVerdict(verdict) {
   if (verdict.blocker?.code === BLOCKER.FOREIGN_DRAFT) {
     return verdict.platform === "bilibili" ? "needs_quarantine" : "blocked_foreign_draft";
   }
+  if (verdict.gates.draftIdentity?.ok !== true) return "blocked";
   if (verdict.gates.video?.ok !== true) return "needs_upload";
   return "needs_mutation";
 }

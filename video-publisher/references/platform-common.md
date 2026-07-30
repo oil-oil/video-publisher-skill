@@ -2,13 +2,20 @@
 
 Read this file and the exact platform reference before changing a live adapter.
 
+## Contents
+
+- Ownership, locks, and final-publish safety
+- Production phases and upload truth
+- Draft identity and central readiness
+- Receipts, blockers, text entities, and acceptance
+
 ## Ownership And Safety
 
 One orchestrator owns all platform task spaces. Do not use sub Agents for live creator-page control.
 
-Before reading or writing job state or starting a platform phase, acquire the state-root `.publisher/orchestrator.lock` and then the job-directory `orchestrator.lock`. The state-root lock allows only one video job to control the shared creator accounts; the job lock additionally protects one persisted job. A second process must fail immediately instead of splitting platform locks with the owner. Remove both locks on every normal exit; after a crash, remove a lock only when its recorded PID is no longer alive. A fresh lock whose owner file is still being written remains busy.
+Before reading or writing job state or starting a platform phase, acquire the account-wide publisher lock under the fixed lock root and then the job-directory `orchestrator.lock`. The publisher lock is independent of `--state-root`; direct platform diagnosis must join the same ownership token or acquire it itself. Register every spawned Ego controller as a token-bound member PID. Treat the lock as stale only when the owner and every registered member are dead. The job lock additionally protects persisted state, and a fresh lock whose owner file is still being written remains busy.
 
-Never click a final `发布`, `发布笔记`, `发表`, or `立即投稿` button without explicit authorization in the current run. Every adapter result must leave `finalPublishClicked: false`. The shared core installs a capture-phase click/submit guard; safety passes only when `guardArmed: true` and `blockedAttempts: 0` are observed from the live page.
+Never click a final `发布`, `发布笔记`, `发表`, or `立即投稿` button. Final publishing is outside this Skill. Every adapter result must leave `finalPublishClicked: false`. The shared core installs a capture-phase click/submit guard; safety passes only when `guardArmed: true` and `blockedAttempts: 0` are observed from the live page.
 
 If Ego reports that the user controls a task space, stop the whole browser job. Do not retry, create a replacement task space, or claim it without explicit user confirmation.
 
@@ -20,20 +27,22 @@ Use `scripts/run-safe-platforms.sh`, which invokes `scripts/v2/publisher.mjs`.
 1. inspect all selected platforms in parallel
 2. resolve Bilibili restore/foreign-draft state through the serial UI queue
 3. upload missing videos in parallel
-4. wait for every upload runner to exit
-5. mutate metadata, entities, declarations, settings, and covers serially
-6. verify platforms independently in parallel
+4. whenever one platform proves upload completion, enqueue its finalization immediately
+5. in the single UI queue, mutate that platform and then verify it independently
+6. freeze typed-blocked platforms and continue every eligible sibling without a global upload barrier
 ```
 
-Do not pipeline UI mutations behind unfinished uploads. Live testing showed that overlapping upload processes and UI control can freeze the shared Ego input channel even across isolated task spaces.
+The rolling scheduler intentionally allows a completed platform to finalize while another platform upload runner is still waiting. Keep all mutation and its paired final verification in the exactly-one-wide UI queue. Earlier live testing showed that overlapping upload processes and UI control can freeze the shared Ego input channel even across isolated task spaces, so this revised tradeoff remains pending a full real selected-platform regression and relies on the global input-channel circuit breaker below.
 
-The browser channel is shared across task spaces. If any runner reports `INPUT_CHANNEL_BROKEN`, treat it as a phase-wide circuit breaker: wait for all already-started parallel runners, skip every remaining quarantine/upload/mutate action, and run only final read-only verification. An ordinary same-job retry after Ego restarts is the recovery path.
+Ordinary typed blockers are platform-local: stop scheduling that platform after its blocker, retain its evidence, and continue successful siblings. `AUTH_REQUIRED` therefore freezes only the unauthenticated platform. `USER_CONTROL` remains global because task-space ownership requires all browser work to stop.
 
-Before step 1, validate the exact local media for every selected platform. The shared media preflight checks file existence and reads MP4/M4V/MOV duration from ISO BMFF metadata without an external `ffprobe` dependency. Douyin permits only 0.1 seconds of container rounding above its real-tested 900-second content limit; anything longer must be excluded before browser work and recorded as `PLATFORM_REJECTED_ASSET`. Other valid selected platforms continue through the same run. If no selected platform is eligible, fail before job creation. Never silently trim, transcode, or substitute another source.
+The browser channel is shared across task spaces. If any runner reports `INPUT_CHANNEL_BROKEN`, treat it as an invocation-wide circuit breaker: let already-started work settle, start no new quarantine/upload/mutate action, preserve any sibling that already completed rolling verification, and run only still-missing final read-only verification. An ordinary same-job retry after Ego restarts is the recovery path.
+
+Before step 1, validate the exact local media for every selected platform. Douyin requires a valid MP4/M4V/MOV duration readable from ISO BMFF metadata and fails closed when it cannot be verified. It permits only 0.1 seconds of container rounding above the real-tested 900-second limit; anything invalid or longer must be excluded before browser work and recorded as `PLATFORM_REJECTED_ASSET`. Other valid platforms continue through the same run. If none is eligible, fail before job creation. Never silently trim, transcode, or substitute another source.
 
 The maintained adapter runner also takes an atomic per-platform filesystem lock. A second process targeting the same platform fails before opening Ego instead of overlapping with an active upload, mutation, inspection, or verification. Stale locks from dead processes are removed automatically. This still permits the intended four-platform parallel upload/check phases.
 
-The three lock levels solve different races: the state-root publisher lock serializes video jobs that share creator accounts, the job lock protects one persisted job, and platform locks prevent accidental same-platform overlap as defense in depth. Four-platform upload/check parallelism remains available inside the one owning video job.
+The three lock levels solve different races: the account-wide publisher lock serializes video jobs across state roots, the job lock protects one persisted job, and platform locks prevent accidental same-platform overlap as defense in depth. Four-platform upload/check parallelism remains available inside the owning job.
 
 Persist the exact task-space name alongside its numeric id. After an Ego crash, ids may be recycled for a different job; a live name mismatch is identity loss, never permission to enter that space. Select or recreate only the stored exact name, invalidate old-space receipts, and verify fresh page truth.
 
@@ -97,7 +106,7 @@ targetUploaded: that completed video matches the requested filename/title
 
 If `anyUploaded` is true and `targetUploaded` is false, the editor is foreign even though the target video gate is false.
 
-WeChat Channels does not expose the filename. Reuse an uploaded draft only when the description is empty or matches the package; a different non-empty description is foreign.
+WeChat Channels does not expose the filename. Reuse an uploaded draft when its description exactly matches the package, or when a fingerprint- and task-space-bound receipt proves that this job injected or resumed the upload. An already uploaded draft with an empty description and no such receipt is `STATE_AMBIGUOUS`; never mutate it. A different non-empty description is foreign.
 
 ## Central Ready Model
 
@@ -160,7 +169,7 @@ PLATFORM_REJECTED_ASSET
 ACTION_FAILED
 ```
 
-Do not hide a typed blocker behind a generic “not ready” message. Only authentication and explicit user control require the user immediately; Bilibili foreign drafts route to quarantine.
+Do not hide a typed blocker behind a generic “not ready” message. Authentication and explicit user control require the user, but only explicit user control stops the whole browser job. Authentication freezes its platform while eligible siblings continue. Bilibili foreign drafts route to quarantine.
 
 ## Platform Text And Tags
 
@@ -175,20 +184,10 @@ Never fake topic/entity HTML. Use the visible editor, real suggestion row, and a
 
 ## Acceptance
 
-Unit tests may prove scheduler barriers, persistence, and gate evaluation. Only a real creator-page run can accept selectors, topic entities, declaration dialogs, settings, draft quarantine, and cover flows.
+Static tests must prove package/media validation, central gate evaluation, rolling scheduler advancement, platform-blocker isolation, global circuit breaking, lock contention, permissions, state/receipt recovery, and structured failure handling. Only a real creator-page run can accept selectors, topic entities, declaration dialogs, account settings, draft quarantine, upload lifecycle, and cover flows.
 
-On 2026-07-14, the production scheduler passed a real four-platform run with four parallel uploads, serialized mutation, persisted task-space/cover state, interruption recovery, and four parallel fresh verifiers all `READY` before the final publish controls.
+As of 2026-07-16, full production runs verified four parallel uploads behind the previous cross-platform barrier, serial UI mutation, parallel final verification, exact stable task-space identity, task-space recreation, atomic backup/checkpoint recovery, interruption during upload and mutation, lock contention and stale-owner cleanup under the then-current layout, invocation-wide input-channel circuit breaking, and repeated no-op `READY` reruns. Every accepted run kept the final-publish guard armed with zero attempts.
 
-On 2026-07-15, a later regression terminated the orchestrator during serialized Douyin topic insertion after every video upload had completed. Recovery found the exact title/body and two of five real topic entities, performed no video upload, safely rebuilt the partial rich editor, completed the remaining platforms, and reached four-platform `READY` plus three no-op reruns.
+The 2026-07-17 rolling finalization scheduler has local integration coverage for early successful-platform mutation, typed upload-blocker isolation, authentication isolation, and retained input-channel circuit breaking. It has not yet passed the required real full selected-platform regression. The rolling scheduler, current account-wide lock path, direct-runner ownership token, fail-closed unknown Douyin duration, and WeChat empty-description receipt rule must remain marked pending until the next applicable real creator-page and full-orchestrator acceptance run.
 
-Another 2026-07-15 regression proved that per-job locks were insufficient for two different jobs: simultaneous runs split platform ownership and one state was left `running`. The state-root publisher lock now rejects one contender before state/browser work while preserving the owner's four-platform parallel phases. The refused real job's prior `READY` state remained byte-identical, and both normal release and dead-PID global-lock recovery passed live testing.
-
-A real process-group `SIGKILL` during four parallel uploads subsequently left all three lock levels plus job state behind. The ordinary same-job retry removed only locks whose PIDs were dead, reused all four numeric task spaces, and received `resume_existing` from every upload adapter. It completed all custom-cover and metadata gates, reached four-platform `READY`, and stayed no-op `READY` for three reruns.
-
-A later Ego Lite process-group crash proved a separate failure boundary. A missing structured browser result is now converted into retryable `INPUT_CHANNEL_BROKEN` evidence with every required gate false, never into upload work or a fatal parse exception. After restart, the explicit task-space recreation signal invalidates stale receipts independently of numeric-id equality. The real recovery rebuilt only lost browser state, reached four-platform `READY`, and passed three further no-op reruns with every final guard armed and zero attempts.
-
-A second real Ego crash during active uploads proved that the broken input channel must stop all later UI work for the entire invocation. The patched orchestrator emitted no mutation phase. On restart, numeric ids recycled into another ready job; exact stable-name matching rejected those collisions. The intended four-platform job recovered to `READY`, and three no-op reruns contained only inspect and verify phases.
-
-A subsequent cold-start run with exact paths containing a space before their suffixes completed four parallel uploads and all custom-cover receipts. It exposed and repaired Douyin's first-topic shared-text-node shape, then reached four-platform `READY` and passed three inspect/verify-only reruns.
-
-A real mutation-stage crash then killed Ego one second after the Douyin mutator started. Douyin returned `INPUT_CHANNEL_BROKEN`; the two platforms still queued behind it recorded no mutation phase. Ordinary recovery rebuilt the lost pages and returned four-platform `READY`, followed by three inspect/verify-only reruns. This proves the phase-wide circuit breaker applies during serial mutation, not only parallel uploads.
+For a page-adapter change, verify the exact live postcondition and a no-op rerun. For scheduler, persistence, locking, shared input, task-space recovery, or receipt changes, repeat the relevant crash/restart case and the full selected-platform production regression. Never treat a one-platform diagnostic or unit test as system-level acceptance.

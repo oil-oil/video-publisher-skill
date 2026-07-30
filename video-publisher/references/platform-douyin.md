@@ -74,16 +74,4 @@ visible enabled 发布 button
 final publish not clicked
 ```
 
-This path passed fresh 308 MB, 208 MB, 731 MB, and 533 MB real draft runs on 2026-07-14 and 2026-07-15, including interrupted-upload takeover without reinjection, recovery from explicit upload failures, exact reconstruction of corrupted rich descriptions, whitespace-normalized topic lookup, a long Chinese title that initially lost a character, topic words repeated in prose, delayed landscape-cover receipt repair, checkpoint recovery, and repeated no-op verification.
-
-A later 534 MB run deleted the ready Douyin task space. The same job created a replacement numeric space, re-uploaded and rebuilt only Douyin, produced fresh distinct portrait and landscape cover receipts, preserved the other three ready drafts, and passed repeated no-op verification.
-
-A 1.12 GB default-cover regression then isolated the 15-minute duration boundary: 15:09 failed explicitly twice, while the 14:59 near-equivalent source reached `READY` and stayed no-op `READY` for three reruns. The production preflight now blocks the known-invalid source before any browser work.
-
-An exact 15:00 stream copy reported 900.010 seconds in ISO BMFF metadata, uploaded on the first diagnostic attempt, and passed exact metadata, five topics, settings, default-cover, final-button, and safety verification. After the 0.1-second tolerance was added, the production orchestrator repeated the upload in a fresh task space, reached `READY`, and passed three no-op reruns. The tolerance exists only for this verified container-rounding behavior.
-
-A later forced process termination left the exact title/body and two of five committed topic entities on the live page. The next production run identified only `tags` as missing, performed no video upload, rebuilt the rich editor without residue or duplicates, and independently verified all five topics.
-
-A sustained-load run later left four valid entities plus the plain fragment `#vibe` after the fifth candidate panel failed. Whole-editor selection could not clear the framework state. The repaired adapter proved the four-entity ordered prefix, removed only the fragment one character at a time (`#vibe` through empty), committed `vibecoding`, uploaded distinct 3:4 and 4:3 covers, and passed fresh `READY` verification plus three full no-op reruns.
-
-A fresh 201 MB run then showed that the first topic query can share one text node with an otherwise exact description. Tail inspection initially misclassified the description plus `#AI封面` as one unsafe query, and the old retry left `#A`. Suffix isolation plus zero-entity-prefix recovery repaired that same page as `#A -> # -> empty`, committed all five entities, preserved exact prose, uploaded both custom covers, and passed three no-op four-platform reruns.
+This contract passed real draft, interrupted-upload, task-space replacement, partial-topic recovery, whitespace-topic, title-focus, custom-cover checkpoint, default-cover, and exact 15-minute boundary runs through 2026-07-16. The detailed cases are encoded in focused tests and the root acceptance boundary; retain only behavior that affects current inspection, mutation, or verification.

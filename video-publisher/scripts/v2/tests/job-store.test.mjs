@@ -29,6 +29,29 @@ test("job store restores only matching receipt checkpoints", async () => {
   assert.equal(fs.existsSync(store.receiptCheckpointPath("douyin")), false);
 });
 
+test("job store keeps private state and evidence permissions", async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "video-publisher-private-state-test-"));
+  const store = new JobStore(root, {
+    schemaVersion: 3,
+    fingerprint: "private-state",
+    platforms: { xiaohongshu: { history: [] } },
+  });
+  await store.initialize();
+  await store.record("xiaohongshu", "inspect", {
+    platform: "xiaohongshu",
+    observedAt: new Date().toISOString(),
+    taskSpaceId: 1,
+  }, { ready: false, missing: ["video"], blocker: null });
+  await store.save();
+  await store.close();
+  assert.equal(fs.statSync(root).mode & 0o777, 0o700);
+  assert.equal(fs.statSync(store.evidenceDir).mode & 0o777, 0o700);
+  assert.equal(fs.statSync(store.checkpointDir).mode & 0o777, 0o700);
+  assert.equal(fs.statSync(store.statePath).mode & 0o777, 0o600);
+  assert.equal(fs.statSync(store.backupPath).mode & 0o777, 0o600);
+  assert.equal(fs.statSync(store.state.platforms.xiaohongshu.lastEvidencePath).mode & 0o777, 0o600);
+});
+
 test("job store restores a corrupt primary from its atomic backup", async () => {
   const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "video-publisher-state-recovery-test-"));
   const initial = {
@@ -79,4 +102,20 @@ test("job store never restores a backup from another package fingerprint", async
   const store = new JobStore(root, { schemaVersion: 3, fingerprint: "expected-package", platforms: {} });
   await assert.rejects(store.initialize(), /backup belongs to another package/);
   assert.equal(await fs.promises.readFile(path.join(root, "state.json"), "utf8"), "{BROKEN_STATE");
+});
+
+test("job store rejects another package before rewriting existing state", async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "video-publisher-state-identity-test-"));
+  const statePath = path.join(root, "state.json");
+  const original = JSON.stringify({
+    schemaVersion: 3,
+    fingerprint: "original-package",
+    updatedAt: "fixed",
+    platforms: {},
+  }, null, 2) + "\n";
+  await fs.promises.writeFile(statePath, original);
+  const store = new JobStore(root, { schemaVersion: 3, fingerprint: "another-package", platforms: {} });
+  await assert.rejects(store.initialize(), /belongs to another package/);
+  assert.equal(await fs.promises.readFile(statePath, "utf8"), original);
+  assert.equal(fs.existsSync(path.join(root, "state.backup.json")), false);
 });

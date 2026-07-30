@@ -2,6 +2,12 @@
 
 Read `platform-common.md` and `ego-browser-workflow.md` first.
 
+## Contents
+
+- Draft resolution and upload entry recovery
+- Metadata, declarations, and exact tags
+- Custom cover and required gates
+
 ## Draft Resolution
 
 Bilibili is the only platform with a tested automatic quarantine path.
@@ -76,7 +82,7 @@ If Bilibili reports that a requested tag is topic-only and cannot be added as a 
 
 ## Custom Cover
 
-Use the user-provided `4:3` asset only when enabled.
+Use the user-provided `16:10` asset from `cover.horizontal16x10Path` only when enabled.
 
 Upload through the active `.bcc-upload-wrapper` image input. The cover editor’s final control can be a `div.button.submit`, not a native button. Wait until its exact label becomes `完成`, click it through the real input channel, and require the editor to close.
 
@@ -95,10 +101,10 @@ video fully uploaded
 exact title and description
 exact requested tag chips plus only allowed auto-tags
 both declaration states
-custom 4:3 receipt when enabled
+custom 16:10 receipt when enabled
 no blocking dialog
 visible enabled 立即投稿 button
 final publish not clicked
 ```
 
-The complete draft path passed real testing on 2026-07-14, including foreign-draft quarantine, the scoped cover-completion fallback, checkpoint recovery, and repeated no-op verification.
+The complete draft path passed real testing on 2026-07-14, including foreign-draft quarantine, the scoped cover-completion fallback, checkpoint recovery, and repeated no-op verification. The dedicated 16:10 cover mapping is locally tested but still requires a fresh creator-page acceptance run.

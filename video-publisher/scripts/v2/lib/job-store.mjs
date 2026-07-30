@@ -5,6 +5,14 @@ function validState(value) {
   return value && typeof value === "object" && !Array.isArray(value);
 }
 
+async function secureJsonFiles(directory) {
+  if (!fs.existsSync(directory)) return;
+  const entries = await fs.promises.readdir(directory, { withFileTypes: true });
+  await Promise.all(entries
+    .filter(entry => entry.isFile() && entry.name.endsWith(".json"))
+    .map(entry => fs.promises.chmod(path.join(directory, entry.name), 0o600)));
+}
+
 async function readState(filePath) {
   const parsed = JSON.parse(await fs.promises.readFile(filePath, "utf8"));
   if (!validState(parsed)) throw new Error(`Job state is not a JSON object: ${filePath}`);
@@ -25,13 +33,24 @@ export class JobStore {
   }
 
   async initialize() {
-    await fs.promises.mkdir(this.evidenceDir, { recursive: true });
-    await fs.promises.mkdir(this.checkpointDir, { recursive: true });
+    await fs.promises.mkdir(this.jobDir, { recursive: true, mode: 0o700 });
+    await fs.promises.chmod(this.jobDir, 0o700);
+    await fs.promises.mkdir(this.evidenceDir, { recursive: true, mode: 0o700 });
+    await fs.promises.chmod(this.evidenceDir, 0o700);
+    await fs.promises.mkdir(this.checkpointDir, { recursive: true, mode: 0o700 });
+    await fs.promises.chmod(this.checkpointDir, 0o700);
+    await secureJsonFiles(this.jobDir);
+    await secureJsonFiles(this.evidenceDir);
+    await secureJsonFiles(this.checkpointDir);
     const expectedFingerprint = this.state?.fingerprint || null;
     if (fs.existsSync(this.statePath)) {
       try {
         this.state = await readState(this.statePath);
+        if (expectedFingerprint && this.state.fingerprint !== expectedFingerprint) {
+          throw new Error(`Job state belongs to another package: ${this.statePath}`);
+        }
       } catch (primaryError) {
+        if (/belongs to another package/.test(String(primaryError?.message || primaryError))) throw primaryError;
         let backup;
         try {
           backup = await readState(this.backupPath);
@@ -87,12 +106,15 @@ export class JobStore {
     const backupTemp = `${this.backupPath}.${process.pid}.${this.sequence}.tmp`;
     this.queue = this.queue.then(async () => {
       try {
-        await fs.promises.writeFile(temp, body);
+        await fs.promises.writeFile(temp, body, { mode: 0o600 });
         if (fs.existsSync(this.statePath)) {
           await fs.promises.copyFile(this.statePath, backupTemp);
+          await fs.promises.chmod(backupTemp, 0o600);
           await fs.promises.rename(backupTemp, this.backupPath);
         }
         await fs.promises.rename(temp, this.statePath);
+        await fs.promises.chmod(this.statePath, 0o600);
+        if (fs.existsSync(this.backupPath)) await fs.promises.chmod(this.backupPath, 0o600);
       } catch (error) {
         await Promise.allSettled([
           fs.promises.rm(temp, { force: true }),
@@ -108,7 +130,7 @@ export class JobStore {
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const file = `${stamp}-${String(this.sequence).padStart(4, "0")}-${platform}-${phase}.json`;
     const evidencePath = path.join(this.evidenceDir, file);
-    await fs.promises.writeFile(evidencePath, JSON.stringify({ observation, verdict }, null, 2) + "\n");
+    await fs.promises.writeFile(evidencePath, JSON.stringify({ observation, verdict }, null, 2) + "\n", { mode: 0o600 });
     const item = this.state.platforms[platform];
     item.lastEvidencePath = evidencePath;
     item.lastObservedAt = observation.observedAt;

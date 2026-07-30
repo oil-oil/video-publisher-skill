@@ -2,6 +2,12 @@
 
 Use Ego Lite for every creator-platform browser action. The production orchestrator owns task-space creation and reuse; use the mechanics below only for adapter work or diagnosis after a runner blocker.
 
+## Contents
+
+- Task-space ownership and recovery
+- Platform URLs, lifecycle, and file upload
+- Real input, diagnostics, and verification
+
 ## Task Spaces
 
 Use one persistent task space per platform. Store both its numeric id and its exact stable name.
@@ -28,7 +34,7 @@ This fallback has passed real task-space-loss tests on all four platforms. A rep
 
 If the Ego Lite process exits or returns no structured observation, return a retryable `INPUT_CHANNEL_BROKEN` blocker with all required gates false and `finalPublishClicked: false`. Do not reinterpret the missing browser channel as a missing upload input, do not start reinjection in that run, and do not throw away the persisted job. The same-job retry after Ego restarts performs normal task-space recovery and fresh inspection.
 
-Because the input channel is process-wide, one such blocker circuit-breaks all remaining browser mutation in the invocation, including work queued for other task spaces. Already-started parallel runners may finish or return their own blocker; after they exit, only final read-only verification may run.
+Because the input channel is process-wide, one such blocker circuit-breaks all browser mutation not yet started in the invocation, including work queued for other task spaces. A sibling that completed rolling finalization before the signal remains complete. Already-started runners may finish or return their own blocker; after they exit, only still-missing final read-only verification may run.
 
 This boundary is real-tested during both parallel upload and serialized mutation. In the mutation test, Ego was terminated one second after the Douyin mutator process appeared; the two later platform mutators never started.
 

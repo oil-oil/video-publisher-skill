@@ -87,3 +87,19 @@ test("Bilibili cover repair continues after a rejected tag and preserves the blo
   assert.ok(finalReturn > coverRepair, "the original typed blocker must survive after independent cover repair");
   assert.doesNotMatch(mutation.slice(tagFailure, coverRepair), /return /, "tag rejection must not return before cover repair");
 });
+
+test("Bilibili uses the dedicated 16:10 cover path and receipt ratio", () => {
+  const source = fs.readFileSync(path.join(PLATFORM_DIR, "bilibili.mjs"), "utf8");
+  assert.match(source, /pkg\.cover\?\.horizontal16x10Path/);
+  assert.match(source, /receipt\.ratio==='16:10'/);
+  assert.match(source, /ratio:'16:10'/);
+  assert.doesNotMatch(source, /pkg\.cover\?\.horizontal4x3Path/);
+});
+
+test("WeChat Channels refuses an unproven uploaded draft with an empty description", () => {
+  const source = fs.readFileSync(path.join(PLATFORM_DIR, "wechat-channels.mjs"), "utf8");
+  assert.match(source, /identityAmbiguous=uploaded&&!description&&!trustedVideoReceipt/);
+  assert.match(source, /expectedVideoReceipt\?\.fingerprint===jobFingerprint/);
+  assert.match(source, /trustedUploadAction:true,mode:'injected'/);
+  assert.match(source, /if\(!before\.gates\.draftIdentity\.ok\)return/);
+});

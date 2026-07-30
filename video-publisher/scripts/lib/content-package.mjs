@@ -25,6 +25,10 @@ export function normalizeDescription(value) {
   return String(value || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
 }
 
+export function codePointLength(value) {
+  return Array.from(String(value || "")).length;
+}
+
 export function getImageDimensions(filePath) {
   const buffer = fs.readFileSync(filePath);
   if (buffer.length >= 24
@@ -62,7 +66,12 @@ export function getImageDimensions(filePath) {
 export function ratioOk(dimensions, expected) {
   if (!dimensions.width || !dimensions.height) return false;
   const actual = dimensions.width / dimensions.height;
-  const target = expected === "3:4" ? 3 / 4 : 4 / 3;
+  const target = {
+    "3:4": 3 / 4,
+    "4:3": 4 / 3,
+    "16:10": 16 / 10,
+  }[expected];
+  if (!target) return false;
   return Math.abs(actual - target) < 0.01;
 }
 
@@ -74,13 +83,14 @@ export function coverAssetsForPlatform(pkg, platform) {
   const cover = pkg.cover || {};
   const verticalPath = String(cover.vertical3x4Path || "").trim();
   const horizontalPath = String(cover.horizontal4x3Path || "").trim();
+  const bilibiliPath = String(cover.horizontal16x10Path || "").trim();
   const mapping = {
     xiaohongshu: verticalPath ? [{ slot: "portrait", ratio: "3:4", path: verticalPath }] : [],
     wechat_channels: [
       ...(verticalPath ? [{ slot: "portrait", ratio: "3:4", path: verticalPath }] : []),
       ...(horizontalPath ? [{ slot: "landscape", ratio: "4:3", path: horizontalPath }] : []),
     ],
-    bilibili: horizontalPath ? [{ slot: "landscape", ratio: "4:3", path: horizontalPath }] : [],
+    bilibili: bilibiliPath ? [{ slot: "landscape", ratio: "16:10", path: bilibiliPath }] : [],
     douyin: [
       ...(verticalPath ? [{ slot: "portrait", ratio: "3:4", path: verticalPath }] : []),
       ...(horizontalPath ? [{ slot: "landscape", ratio: "4:3", path: horizontalPath }] : []),
@@ -110,6 +120,7 @@ export function readPackage(packagePath, { config: suppliedConfig } = {}) {
     uploadCustomCover: parsed.cover?.uploadCustomCover === true,
     vertical3x4Path: String(parsed.cover?.vertical3x4Path || "").trim(),
     horizontal4x3Path: String(parsed.cover?.horizontal4x3Path || "").trim(),
+    horizontal16x10Path: String(parsed.cover?.horizontal16x10Path || "").trim(),
   };
   const douyinTopicSource = Array.isArray(parsed.douyinTopics)
     ? parsed.douyinTopics
@@ -186,7 +197,8 @@ export function validateDouyinPackage(pkg) {
   const errors = validateCommonPackage(pkg);
   errors.push(...validateCoverPackage(pkg, "douyin"));
   const douyinTitle = String(pkg.platformTitle?.douyin || pkg.title || "");
-  if (douyinTitle.length > 30) errors.push(`douyin title is ${douyinTitle.length}/30`);
+  const douyinTitleLength = codePointLength(douyinTitle);
+  if (douyinTitleLength > 30) errors.push(`douyin title is ${douyinTitleLength}/30`);
   if ((pkg.douyinDescription.match(/#[^\s#]+/g) || []).length) {
     errors.push("douyinDescription must not contain inline hashtags; use douyinTopics");
   }
@@ -198,7 +210,9 @@ export function validateDouyinPackage(pkg) {
 export function validateBilibiliPackage(pkg) {
   const errors = validateCommonPackage(pkg);
   errors.push(...validateCoverPackage(pkg, "bilibili"));
-  if (pkg.title.length > 80) errors.push(`bilibili title is ${pkg.title.length}/80`);
+  const bilibiliTitle = String(pkg.platformTitle?.bilibili || pkg.title || "");
+  const bilibiliTitleLength = codePointLength(bilibiliTitle);
+  if (bilibiliTitleLength > 80) errors.push(`bilibili title is ${bilibiliTitleLength}/80`);
   if (!pkg.bilibiliDescription) errors.push("bilibiliDescription is required");
   if (!pkg.bilibiliTags.length) errors.push("bilibiliTags are required");
   if (pkg.bilibiliTags.length > 10) errors.push("bilibili supports at most 10 tags");
@@ -209,8 +223,13 @@ export function validateXiaohongshuPackage(pkg) {
   const errors = validateCommonPackage(pkg);
   errors.push(...validateCoverPackage(pkg, "xiaohongshu"));
   const xhsTitle = String(pkg.platformTitle?.xiaohongshu || pkg.xhsTitle || pkg.xiaohongshuTitle || pkg.title || "").trim();
-  if (xhsTitle.length > 20) errors.push(`xiaohongshu title is ${xhsTitle.length}/20`);
+  const xhsTitleLength = codePointLength(xhsTitle);
+  if (xhsTitleLength > 20) errors.push(`xiaohongshu title is ${xhsTitleLength}/20`);
   if (!pkg.xhsTopics.length) errors.push("xhsTopics are required");
+  const dottedTopics = pkg.xhsTopics.filter(topic => topic.includes("."));
+  if (dottedTopics.length) {
+    errors.push(`xiaohongshu topics do not support "."; use a dot-free label instead: ${dottedTopics.join(", ")}`);
+  }
   return errors;
 }
 

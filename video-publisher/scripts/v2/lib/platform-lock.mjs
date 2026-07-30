@@ -30,15 +30,18 @@ function readOwner(lockPath) {
 }
 
 export function acquirePlatformLock(platform, phase, options = {}) {
-  const root = options.root || path.join(os.homedir(), ".video-publisher", "v2-locks");
+  const root = options.root
+    || (process.env.VIDEO_PUBLISHER_V2_LOCK_ROOT ? path.resolve(process.env.VIDEO_PUBLISHER_V2_LOCK_ROOT) : "")
+    || path.join(os.homedir(), ".video-publisher", "v2-locks");
   const lockPath = path.join(root, `${platform}.lock`);
-  fs.mkdirSync(root, { recursive: true });
+  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+  fs.chmodSync(root, 0o700);
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      fs.mkdirSync(lockPath);
+      fs.mkdirSync(lockPath, { mode: 0o700 });
       const owner = { pid: process.pid, platform, phase, acquiredAt: new Date().toISOString() };
-      fs.writeFileSync(path.join(lockPath, "owner.json"), JSON.stringify(owner, null, 2));
+      fs.writeFileSync(path.join(lockPath, "owner.json"), JSON.stringify(owner, null, 2), { mode: 0o600 });
       let released = false;
       return () => {
         if (released) return;

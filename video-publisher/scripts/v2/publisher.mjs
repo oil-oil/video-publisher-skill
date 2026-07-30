@@ -14,9 +14,9 @@ import {
 import { loadConfig } from "../lib/config.mjs";
 import { inspectMediaFile, validateMediaForPlatform } from "../lib/media.mjs";
 import { buildIdentity } from "./lib/identity.mjs";
-import { acquireJobLock } from "./lib/job-lock.mjs";
+import { acquireJobLock, resolvePublisherLockDirectory } from "./lib/job-lock.mjs";
 import { JobStore } from "./lib/job-store.mjs";
-import { BLOCKER, PLATFORMS, classifyVerdict, compactVerdict, evaluateObservation } from "./lib/model.mjs";
+import { BLOCKER, PLATFORMS, classifyVerdict, compactVerdict, evaluateObservation, videoReceiptFromObservation } from "./lib/model.mjs";
 import { parseV2Result } from "./lib/result-line.mjs";
 import { runPool, SerialQueue } from "./lib/scheduler.mjs";
 
@@ -27,6 +27,7 @@ const validators = { xiaohongshu: validateXiaohongshuPackage, douyin: validateDo
 
 class UsageError extends Error {}
 const activeLockReleases = [];
+let publisherLockToken = "";
 
 function positive(raw, name) {
   const value = Number(raw);
@@ -68,11 +69,14 @@ function parseArgs(argv) {
   const packagePath = path.resolve(positional.shift());
   let taskSuffix = "manual";
   if (positional.length && !PLATFORMS.includes(positional[0])) taskSuffix = positional.shift();
-  const platforms = positional.length ? positional : [...config.defaultPlatforms];
+  const platforms = [...new Set(positional.length ? positional : config.defaultPlatforms)];
   if (platforms.some(platform => !PLATFORMS.includes(platform))) throw new UsageError("Unsupported platform argument");
   const unavailablePlatforms = platforms.filter(platform => !config.availablePlatforms.includes(platform));
   if (unavailablePlatforms.length) {
     throw new UsageError(`Platform is not configured as available: ${unavailablePlatforms.join(", ")}. Update Video Publisher onboarding before browser work.`);
+  }
+  if (options.jobId && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(options.jobId)) {
+    throw new UsageError("--job-id must be 1-128 characters using only letters, numbers, dot, underscore, or hyphen, and must start with a letter or number");
   }
   return { ...options, packagePath, taskSuffix, platforms };
 }
@@ -102,7 +106,7 @@ function initialState(jobId, identity, args) {
     scheduler: { checkConcurrency: args.checkConcurrency, uploadConcurrency: args.uploadConcurrency, uiConcurrency: 1 },
     video: identity.video,
     assets: identity.assets,
-    platforms: Object.fromEntries(args.platforms.map(platform => [platform, { status: "new", taskSpaceId: null, taskSpaceName: null, receipts: {}, verdict: null, history: [] }])),
+    platforms: Object.fromEntries(args.platforms.map(platform => [platform, { status: "new", taskSpaceId: null, taskSpaceName: null, videoReceipt: null, receipts: {}, verdict: null, history: [] }])),
   };
 }
 
@@ -129,11 +133,13 @@ async function main() {
   const identity = await buildIdentity(pkg);
   const jobId = args.jobId || identity.fingerprint.slice(0, 16);
   const jobDir = path.join(args.stateRoot, jobId);
-  activeLockReleases.push(acquireJobLock(path.join(args.stateRoot, ".publisher"), {
+  const publisherRelease = acquireJobLock(resolvePublisherLockDirectory(), {
     jobId,
     packagePath: args.packagePath,
     scope: "publisher",
-  }));
+  });
+  publisherLockToken = publisherRelease.token;
+  activeLockReleases.push(publisherRelease);
   activeLockReleases.push(acquireJobLock(jobDir, { jobId, packagePath: args.packagePath }));
   const store = new JobStore(jobDir, initialState(jobId, identity, args));
   const state = await store.initialize();
@@ -141,7 +147,7 @@ async function main() {
     console.error(`[video-publisher-v2] restored corrupt job state from atomic backup; preserved=${store.lastRecovery.corruptPath}`);
   }
   if (state.fingerprint !== identity.fingerprint) throw new Error(`Job ${jobId} belongs to another package`);
-  for (const platform of args.platforms) state.platforms[platform] ||= { status: "new", taskSpaceId: null, taskSpaceName: null, receipts: {}, verdict: null, history: [] };
+  for (const platform of args.platforms) state.platforms[platform] ||= { status: "new", taskSpaceId: null, taskSpaceName: null, videoReceipt: null, receipts: {}, verdict: null, history: [] };
   for (const platform of args.platforms) {
     const item = state.platforms[platform];
     if (!item.taskSpaceName && item.lastEvidencePath && fs.existsSync(item.lastEvidencePath)) {
@@ -158,6 +164,8 @@ async function main() {
       item.receiptTaskSpaceId = null;
       await store.clearReceiptCheckpoint(platform);
     }
+    if (item.videoReceipt?.taskSpaceId != null && item.taskSpaceId != null
+      && Number(item.videoReceipt.taskSpaceId) !== Number(item.taskSpaceId)) item.videoReceipt = null;
     const checkpoint = await store.loadReceiptCheckpoint(platform, state.fingerprint, item.taskSpaceId);
     if (checkpoint) {
       item.receipts = { ...checkpoint.receipts, ...(item.receipts || {}) };
@@ -194,6 +202,8 @@ async function main() {
 
   const runnerPath = path.resolve(process.env.VIDEO_PUBLISHER_V2_RUNNER || path.join(DIR, "run-platform.mjs"));
   let inputChannelBroken = false;
+  let userControl = false;
+  const verifiedPlatforms = new Set();
   async function invoke(platform, phase) {
     const item = state.platforms[platform];
     const previousTaskSpaceId = item.taskSpaceId;
@@ -206,6 +216,8 @@ async function main() {
         VIDEO_PUBLISHER_V2_CHECKPOINT_PATH: store.receiptCheckpointPath(platform),
         VIDEO_PUBLISHER_V2_FINGERPRINT: state.fingerprint,
         VIDEO_PUBLISHER_V2_TASK_NAME: item.taskSpaceName || "",
+        VIDEO_PUBLISHER_V2_VIDEO_RECEIPT: JSON.stringify(item.videoReceipt || null),
+        VIDEO_PUBLISHER_V2_PUBLISHER_LOCK_TOKEN: publisherLockToken,
       },
     });
     const observation = parseV2Result(`${execution.stdout}\n${execution.stderr}`);
@@ -215,6 +227,7 @@ async function main() {
     const taskSpaceRecreated = observation.taskSpaceRecovery?.recreated === true;
     if (taskSpaceChanged || taskSpaceRecreated) {
       item.receipts = {};
+      item.videoReceipt = null;
       item.receiptTaskSpaceId = null;
       await store.clearReceiptCheckpoint(platform);
       observation.recovery = {
@@ -230,8 +243,16 @@ async function main() {
       item.receipts = { ...(item.receipts || {}), ...observation.receipts };
       item.receiptTaskSpaceId = observation.taskSpaceId ?? item.taskSpaceId ?? null;
     }
+    const videoReceipt = phase === "upload"
+      ? videoReceiptFromObservation(observation, state.fingerprint, item.taskSpaceId)
+      : null;
+    if (videoReceipt) item.videoReceipt = videoReceipt;
     const verdict = evaluateObservation(observation);
     if (verdict.blocker?.code === BLOCKER.INPUT_CHANNEL_BROKEN) inputChannelBroken = true;
+    if (verdict.blocker?.code === BLOCKER.USER_CONTROL) userControl = true;
+    if (phase === "verify"
+      && verdict.blocker?.code !== BLOCKER.INPUT_CHANNEL_BROKEN
+      && verdict.blocker?.code !== BLOCKER.USER_CONTROL) verifiedPlatforms.add(platform);
     item.status = classifyVerdict(verdict);
     if (observation.blocker) item.status = verdict.blocker?.requiresUser ? "blocked_user" : "blocked";
     await store.record(platform, phase, observation, compactVerdict(verdict));
@@ -242,7 +263,8 @@ async function main() {
   console.error(`[video-publisher-v2] inspect parallel=${args.checkConcurrency}`);
   await runPool(runnablePlatforms, args.checkConcurrency, platform => invoke(platform, "inspect"));
   if (args.inspectOnly) {
-    state.status = runnablePlatforms.length === args.platforms.length ? "inspected" : "blocked";
+    const hardBlocked = args.platforms.some(platform => ["blocked", "blocked_user", "blocked_foreign_draft"].includes(state.platforms[platform].status));
+    state.status = runnablePlatforms.length === args.platforms.length && !hardBlocked ? "inspected" : "blocked";
     await store.save();
     await store.close();
     console.log(JSON.stringify(summary(state, args.platforms, store.statePath), null, 2));
@@ -250,8 +272,7 @@ async function main() {
     return;
   }
 
-  const userBlocked = runnablePlatforms.find(platform => state.platforms[platform].status === "blocked_user");
-  if (userBlocked) {
+  if (userControl) {
     state.status = "paused_user";
     await store.save(); await store.close();
     console.log(JSON.stringify(summary(state, args.platforms, store.statePath), null, 2));
@@ -261,48 +282,81 @@ async function main() {
   const ui = new SerialQueue();
   const quarantineTargets = inputChannelBroken ? [] : runnablePlatforms.filter(key => state.platforms[key].status === "needs_quarantine");
   for (const platform of quarantineTargets) {
-    if (inputChannelBroken) break;
+    if (inputChannelBroken || userControl) break;
     await ui.enqueue(async () => {
+      if (inputChannelBroken || userControl) return;
       const result = await invoke(platform, "quarantine");
-      if (result.observation.quarantine?.safeToUpload) await invoke(platform, "inspect");
+      if (!inputChannelBroken && !userControl && result.observation.quarantine?.safeToUpload) await invoke(platform, "inspect");
     });
   }
 
-  const uploadTargets = inputChannelBroken ? [] : runnablePlatforms.filter(platform => state.platforms[platform].status === "needs_upload");
+  const terminalStatuses = new Set(["blocked", "blocked_user", "blocked_foreign_draft"]);
+  const canAdvance = platform => !terminalStatuses.has(state.platforms[platform].status)
+    && ["ready", "needs_mutation"].includes(state.platforms[platform].status);
+  const advancementTasks = new Map();
+
+  function scheduleAdvance(platform) {
+    if (advancementTasks.has(platform)) return advancementTasks.get(platform);
+    const task = ui.enqueue(async () => {
+      if (inputChannelBroken || userControl || !canAdvance(platform)) return;
+
+      if (state.platforms[platform].status === "needs_mutation") {
+        await invoke(platform, "mutate");
+        if (inputChannelBroken || userControl || terminalStatuses.has(state.platforms[platform].status)) return;
+      }
+
+      await invoke(platform, "verify");
+      if (inputChannelBroken || userControl || terminalStatuses.has(state.platforms[platform].status)) return;
+
+      // One targeted retry is allowed only for an idempotent mutation whose fresh
+      // verifier returned STATE_AMBIGUOUS. Typed action/auth/risk-control failures
+      // freeze only that platform and are never looped.
+      const verdict = state.platforms[platform].verdict;
+      if (state.platforms[platform].status === "needs_mutation"
+        && verdict?.blocker?.code === BLOCKER.STATE_AMBIGUOUS) {
+        await invoke(platform, "mutate");
+        if (inputChannelBroken || userControl || terminalStatuses.has(state.platforms[platform].status)) return;
+        await invoke(platform, "verify");
+      }
+    }).then(
+      () => ({ platform, error: null }),
+      error => ({ platform, error }),
+    );
+    advancementTasks.set(platform, task);
+    return task;
+  }
+
+  // Start every missing upload first. Each successful runner immediately feeds the
+  // single post-upload UI queue; a slow or typed-blocked sibling is not a barrier.
+  const uploadTargets = inputChannelBroken || userControl ? [] : runnablePlatforms.filter(platform => state.platforms[platform].status === "needs_upload");
   console.error(`[video-publisher-v2] upload parallel=${args.uploadConcurrency}: ${uploadTargets.join(",") || "none"}`);
-  await runPool(uploadTargets, args.uploadConcurrency, platform => invoke(platform, "upload"));
-
-  // No UI mutation starts until every Ego upload process has exited. Live testing proved
-  // that overlap freezes the shared browser input channel even across task spaces.
-  // A broken browser input channel is also a phase-wide circuit breaker: wait for the
-  // parallel runners, skip every later mutation, and let final read-only verification
-  // record whatever page truth Ego exposes after restart.
-  const mutationTargets = inputChannelBroken ? [] : runnablePlatforms.filter(platform => state.platforms[platform].status === "needs_mutation");
-  console.error(`[video-publisher-v2] UI serial: ${mutationTargets.join(",") || "none"}${inputChannelBroken ? " (input channel broken)" : ""}`);
-  for (const platform of mutationTargets) {
-    if (inputChannelBroken) break;
-    await ui.enqueue(() => invoke(platform, "mutate"));
-  }
-  await ui.idle();
-
-  console.error(`[video-publisher-v2] final verify parallel=${args.checkConcurrency}`);
-  await runPool(runnablePlatforms.filter(platform => state.platforms[platform].status !== "blocked_user"), args.checkConcurrency, platform => invoke(platform, "verify"));
-
-  // One targeted retry is allowed only for an idempotent mutation whose fresh verifier
-  // returned STATE_AMBIGUOUS. Typed action/auth/risk-control failures are never looped.
-  const retryTargets = (inputChannelBroken ? [] : runnablePlatforms).filter(platform => {
-    const verdict = state.platforms[platform].verdict;
-    return state.platforms[platform].status === "needs_mutation" && verdict?.blocker?.code === BLOCKER.STATE_AMBIGUOUS;
+  const uploadPool = runPool(uploadTargets, args.uploadConcurrency, async platform => {
+    if (inputChannelBroken || userControl) return;
+    await invoke(platform, "upload");
+    if (!inputChannelBroken && !userControl && canAdvance(platform)) scheduleAdvance(platform);
   });
-  for (const platform of retryTargets) {
-    if (inputChannelBroken) break;
-    await ui.enqueue(() => invoke(platform, "mutate"));
-  }
+
+  const immediateTargets = runnablePlatforms.filter(platform => canAdvance(platform));
+  console.error(`[video-publisher-v2] rolling UI serial: ${immediateTargets.join(",") || "waiting for uploads"}`);
+  for (const platform of immediateTargets) scheduleAdvance(platform);
+
+  await uploadPool;
+  const advancementResults = await Promise.all([...advancementTasks.values()]);
+  const advancementFailure = advancementResults.find(result => result.error);
+  if (advancementFailure) throw advancementFailure.error;
   await ui.idle();
-  if (retryTargets.length) await runPool(retryTargets, args.checkConcurrency, platform => invoke(platform, "verify"));
+
+  // INPUT_CHANNEL_BROKEN remains invocation-wide. Work already completed before the
+  // signal stays recorded; no new mutation starts after it. One final read-only pass
+  // covers only platforms that have not already completed their rolling verification.
+  if (inputChannelBroken && !userControl) {
+    const verifyTargets = runnablePlatforms.filter(platform => !verifiedPlatforms.has(platform));
+    console.error(`[video-publisher-v2] input channel broken; final verify parallel=${args.checkConcurrency}: ${verifyTargets.join(",") || "none"}`);
+    await runPool(verifyTargets, args.checkConcurrency, platform => userControl ? null : invoke(platform, "verify"));
+  }
 
   const complete = args.platforms.every(platform => state.platforms[platform].verdict?.ready === true);
-  state.status = complete ? "ready" : "blocked";
+  state.status = userControl ? "paused_user" : complete ? "ready" : "blocked";
   await store.save(); await store.close();
   console.log(JSON.stringify(summary(state, args.platforms, store.statePath), null, 2));
   if (!complete) process.exitCode = 10;

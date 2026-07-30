@@ -4,26 +4,29 @@ Use this file only when the user explicitly asks to upload cover files that alre
 
 ## Package Fields
 
-Only include the ratios required by the selected platforms. Recommended dimensions are 1080 × 1440 for 3:4 and 1440 × 1080 for 4:3.
+Only include the ratios required by the selected platforms. Recommended dimensions are 1080 × 1440 for 3:4, 1440 × 1080 for 4:3, and 1280 × 800 for Bilibili 16:10.
 
 ```json
 {
   "cover": {
     "uploadCustomCover": true,
     "vertical3x4Path": "/absolute/path/cover-3x4.png",
-    "horizontal4x3Path": "/absolute/path/cover-4x3.png"
+    "horizontal4x3Path": "/absolute/path/cover-4x3.png",
+    "horizontal16x10Path": "/absolute/path/cover-16x10.png"
   }
 }
 ```
 
 `uploadCustomCover` must be explicitly true. Merely providing paths does not authorize upload.
 
+When the supplied cover comes from oil-cover, map `<视频名>_16x10.png` to `horizontal16x10Path` for Bilibili.
+
 Mapping:
 
 ```text
 Xiaohongshu: vertical 3:4
 Douyin: vertical 3:4 and horizontal 4:3
-Bilibili: horizontal 4:3
+Bilibili: horizontal 16:10
 WeChat Channels: vertical 3:4 and horizontal 4:3
 ```
 

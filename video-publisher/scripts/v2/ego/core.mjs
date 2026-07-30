@@ -137,10 +137,12 @@ function checkpointReceipts(receipts) {
     writtenAt: new Date().toISOString(),
     receipts,
   };
-  fs.mkdirSync(path.dirname(receiptCheckpointPath), { recursive: true });
+  fs.mkdirSync(path.dirname(receiptCheckpointPath), { recursive: true, mode: 0o700 });
+  fs.chmodSync(path.dirname(receiptCheckpointPath), 0o700);
   const temp = `${receiptCheckpointPath}.${process.pid}.tmp`;
-  fs.writeFileSync(temp, JSON.stringify(payload, null, 2) + '\n');
+  fs.writeFileSync(temp, JSON.stringify(payload, null, 2) + '\n', { mode: 0o600 });
   fs.renameSync(temp, receiptCheckpointPath);
+  fs.chmodSync(receiptCheckpointPath, 0o600);
   return { ok: true, path: receiptCheckpointPath, writtenAt: payload.writtenAt };
 }
 

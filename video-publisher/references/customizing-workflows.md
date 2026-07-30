@@ -4,6 +4,12 @@ Use this guide whenever a user wants to customize the Skill's creator-page behav
 
 Read `platform-common.md`, `ego-browser-workflow.md`, and the target platform reference first. Use `scripts/v2/publisher.mjs` for acceptance and `scripts/v2/run-platform.mjs` only for bounded one-platform diagnosis.
 
+## Contents
+
+- Intake and behavior classification
+- Live diagnosis and idempotent implementation
+- Change map, safety rules, and acceptance
+
 ## Fast Intake
 
 Translate the request into this five-part contract. Ask only for facts that cannot be discovered safely from the live page.
@@ -168,6 +174,6 @@ Static tests are necessary but not sufficient. For every custom page behavior:
 7. Complete three consecutive full no-op reruns for a changed live adapter.
 8. Verify every selected platform is `READY`, every final guard is armed, blocked attempts are zero, and final publish was not clicked.
 9. Update this Skill's platform contract and live-test boundary with only what real evidence proved.
-10. Run the full test suite, Skill validation, source/public parity check, and privacy scan before sharing or pushing.
+10. Run the full test suite and Skill validation. Search the Skill directory for credentials, cookies, tokens, account ids, and unintended absolute personal paths before sharing or pushing.
 
 If the change alters upload scheduling, task-space recovery, shared input handling, persistence, or receipts, add the relevant real crash/restart test instead of relying only on a one-platform happy path.

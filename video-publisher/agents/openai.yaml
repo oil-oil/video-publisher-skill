@@ -1,7 +1,7 @@
 interface:
   display_name: "Video Publisher"
   short_description: "为小红书、抖音、B站和视频号安全准备并验证视频草稿"
-  default_prompt: "使用 $video-publisher；若尚未完成配置，先确认我拥有和默认使用的平台，再将本地视频准备为这些平台的可发布草稿，并停在最终发布按钮前。"
+  default_prompt: "使用 $video-publisher；确认视频、平台、文案和原创声明依据，将本地视频准备为已验证草稿，并始终停在最终发布按钮前由我手动审核发布。"
 
 policy:
   allow_implicit_invocation: true

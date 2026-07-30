@@ -37,7 +37,7 @@ const coverAssets = coverAssetsForPlatform(pkg, platform);
 const result = {
   platform,
   ok: errors.length === 0,
-  title: pkg.title,
+  title: pkg.platformTitle?.[platform] || pkg.title,
   media,
   douyinTopics: platform === "douyin" ? pkg.douyinTopics : undefined,
   cover: {

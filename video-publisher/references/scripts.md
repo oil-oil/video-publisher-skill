@@ -1,6 +1,13 @@
 # Production And Diagnostic Commands
 
-All paths below are relative to the skill directory.
+All paths below are relative to the Skill directory. Resolve the directory containing `SKILL.md` and use it as the working directory before running any command.
+
+## Contents
+
+- Configuration and package validation
+- Production orchestrator and recovery
+- One-platform diagnosis
+- Result contract and local tests
 
 ## Configuration
 
@@ -30,7 +37,7 @@ bilibili
 wechat_channels
 ```
 
-Validation checks the local video path, title limits, required platform fields, package-supplied Douyin topics, and any requested cover paths and ratios. For MP4/M4V/MOV it reports duration from ISO BMFF metadata without `ffprobe`; Douyin content above the real-tested 900-second boundary, plus a maximum 0.1-second allowance for container rounding, fails with `DOUYIN_DURATION_LIMIT` before browser work. In a mixed-platform production run, the orchestrator records the invalid platform as `PLATFORM_REJECTED_ASSET` and continues every other platform that passed preflight.
+Validation checks the local video path, Unicode title limits, required platform fields, package-supplied Douyin topics, and requested cover paths and ratios. Douyin requires a valid MP4/M4V/MOV duration readable from ISO BMFF metadata; unknown duration fails closed with `DOUYIN_DURATION_UNVERIFIED`, while content above 900 seconds plus 0.1 seconds of container-rounding tolerance fails with `DOUYIN_DURATION_LIMIT`. In a mixed-platform run, the orchestrator records an invalid platform as `PLATFORM_REJECTED_ASSET` and continues every other platform that passed preflight.
 
 ## Production Orchestrator
 
@@ -43,7 +50,7 @@ scripts/run-safe-platforms.sh \
 
 When onboarding has `declarations.originalityPolicy: all_videos_original`, the runner applies truthful original/self-made declarations without another flag. With the generic `ask_each_run` policy, add `--confirm-original-rights` only after the user confirms the current video; this one-run override is not persisted. Read-only `--inspect-only` never needs either signal.
 
-The platform list is optional; omit it to select all four. If the second positional argument is a platform key, the task suffix defaults to `manual`.
+The platform list is optional; omit it to use configured `defaultPlatforms`. Explicit platform arguments may select any configured `availablePlatforms`. If the second positional argument is a platform key, the task suffix defaults to `manual`.
 
 Read-only inspection:
 
@@ -70,17 +77,21 @@ UI concurrency is fixed at `1` and has no public override.
 
 State defaults to `~/.video-publisher/v2-jobs/<job-id>/`. The job stores the package fingerprint, numeric task-space ids, exact stable task-space names, task-space-bound receipts, observations, compact verdicts, an atomic one-generation `state.backup.json`, and schema-`2` receipt checkpoints under `checkpoints/`. An invalid primary state may recover only from a fingerprint-matching backup; the corrupt file is preserved as `state.corrupt-<timestamp>.json`, after which all platform gates are read again.
 
-Before state or browser work, production acquires `~/.video-publisher/v2-jobs/.publisher/orchestrator.lock/owner.json`, then `<job-dir>/orchestrator.lock/owner.json`. The first permits only one video publishing job under the state root while preserving four-platform parallelism inside that job; the second protects its persisted state. A simultaneous different job or duplicate invocation exits immediately. Normal completion removes both locks; a later run removes a stale lock only when the recorded owner PID is dead.
+Uploads run in parallel, but there is no cross-platform completion barrier. As soon as one platform proves its upload complete, it enters the exactly-one-wide rolling UI queue for mutation and fresh verification. A typed platform blocker freezes that platform and is returned in the partial summary while eligible siblings continue to `READY`. The command still exits `10` unless every selected platform is ready.
+
+Before state or browser work, production acquires the account-wide publisher lock under `${VIDEO_PUBLISHER_V2_LOCK_ROOT:-$HOME/.video-publisher/v2-locks}/publisher/`, then `<job-dir>/orchestrator.lock/`. The first is independent of `--state-root`; the second protects persisted state. Direct diagnosis proves parent-lock ownership or acquires the same lock, and each spawned Ego controller registers a token-bound member PID. Normal completion removes locks; crash recovery removes the publisher lock only after its owner and all registered members are dead.
+
+Job directories use mode `0700`. State, evidence, receipt checkpoints, and lock-owner JSON use mode `0600`; opening an existing job also repairs older broader permissions.
 
 To resume an interrupted run, repeat the same command with the same `--job-id`. The package fingerprint must match. The orchestrator reuses a persisted task space only when both its numeric id and exact stable name identify the same live space; this prevents Ego's post-crash numeric-id recycling from entering another job. It restores only checkpoints whose platform, package fingerprint, and task-space id all match, then inspects page truth again before acting. If the recorded id is missing or has another live name, the runner selects or recreates only the recorded exact platform-space name and writes its current id back. An explicit recreation invalidates receipts even when Ego assigns the replacement the same numeric id. Ownership or user-control errors never use this fallback.
 
-`INPUT_CHANNEL_BROKEN` is invocation-wide. Once any parallel runner records it, the orchestrator waits for sibling runners, skips every later UI mutation, and performs only final read-only verification. The next ordinary same-job invocation resumes after Ego restarts; do not manually clean state or re-run a one-platform mutator inside the broken invocation.
+`INPUT_CHANNEL_BROKEN` is invocation-wide. Once any runner records it, the orchestrator lets already-started work settle, starts no new UI mutation, preserves platforms that already completed rolling verification, and performs only still-missing final read-only verification. `USER_CONTROL` also stops the whole browser job. Other typed blockers, including `AUTH_REQUIRED`, are platform-local. The next ordinary same-job invocation resumes after Ego restarts; do not manually clean state or re-run a one-platform mutator inside the broken invocation.
 
 Exit codes:
 
 ```text
-0: every selected platform is ready, or read-only inspection completed
-10: at least one platform remains blocked or incomplete
+0: every selected platform is ready, or read-only inspection completed without a hard blocker
+10: at least one platform has a hard blocker, including unavailable browser input or user control
 1: fatal runner/parse/environment error
 2: command usage error
 ```

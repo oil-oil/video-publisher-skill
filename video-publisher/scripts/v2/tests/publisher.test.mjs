@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const V2_DIR = path.dirname(DIR);
+process.env.VIDEO_PUBLISHER_V2_LOCK_ROOT = path.join(os.tmpdir(), `video-publisher-publisher-test-locks-${process.pid}`);
 
 function run(command, args, options) {
   return new Promise((resolve, reject) => {
@@ -33,18 +34,18 @@ function mp4WithDuration(durationSeconds, timescale = 1000) {
   return Buffer.concat([box("ftyp", Buffer.alloc(4)), box("moov", box("mvhd", payload))]);
 }
 
-test("publisher waits for every upload process before serial UI mutation", async () => {
+test("publisher advances a successful platform before a slow blocked upload exits", async () => {
   const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-test-"));
   const log=path.join(root,"events.ndjson");
   const videoPath=path.join(root,"sample-video.mp4");
   const packagePath=path.join(root,"package.json");
   const configPath=path.join(root,"config.json");
-  await fs.promises.writeFile(videoPath,"test video fixture");
+  await fs.promises.writeFile(videoPath,mp4WithDuration(30));
   await fs.promises.writeFile(configPath,JSON.stringify({
     schemaVersion:1,
     onboarding:{completed:true},
     sourceDirectory:root,
-    defaultPlatforms:["xiaohongshu","douyin","bilibili","wechat_channels"]
+    defaultPlatforms:["xiaohongshu","douyin"]
   }));
   await fs.promises.writeFile(packagePath,JSON.stringify({
     videoPath,
@@ -57,15 +58,73 @@ test("publisher waits for every upload process before serial UI mutation", async
     wechatTags:["Automation","Tutorial"],
     cover:{uploadCustomCover:false}
   }));
-  const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"test","--confirm-original-rights","--state-root",root],{env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),VIDEO_PUBLISHER_V2_MOCK_LOG:log}});
-  assert.equal(result.code,0,`${result.stderr}\n${result.stdout}`);
+  const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"test","xiaohongshu","douyin","--confirm-original-rights","--state-root",root],{env:{
+    ...process.env,
+    VIDEO_PUBLISHER_CONFIG:configPath,
+    VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),
+    VIDEO_PUBLISHER_V2_MOCK_LOG:log,
+    VIDEO_PUBLISHER_V2_MOCK_DELAYS:JSON.stringify({"xiaohongshu:upload":10,"douyin:upload":180}),
+    VIDEO_PUBLISHER_V2_MOCK_BLOCKERS:JSON.stringify({"douyin:upload":{code:"UPLOAD_STALLED",message:"mock stalled upload",retryable:true,requiresUser:false}}),
+  }});
+  assert.equal(result.code,10,`${result.stderr}\n${result.stdout}`);
   const events=(await fs.promises.readFile(log,"utf8")).trim().split(/\n/).map(line=>JSON.parse(line));
-  const lastUploadEnd=Math.max(...events.filter(item=>item.phase==="upload"&&item.event==="end").map(item=>item.at));
-  const firstMutationStart=Math.min(...events.filter(item=>item.phase==="mutate"&&item.event==="start").map(item=>item.at));
-  assert.ok(lastUploadEnd<=firstMutationStart,{lastUploadEnd,firstMutationStart});
+  const blockedUploadEnd=events.find(item=>item.platform==="douyin"&&item.phase==="upload"&&item.event==="end").at;
+  const successfulMutationStart=events.find(item=>item.platform==="xiaohongshu"&&item.phase==="mutate"&&item.event==="start").at;
+  assert.ok(successfulMutationStart<blockedUploadEnd,{successfulMutationStart,blockedUploadEnd});
+  assert.equal(events.some(item=>item.platform==="douyin"&&["mutate","verify"].includes(item.phase)),false,"the blocked platform must be frozen after its typed blocker");
   const summary=JSON.parse(result.stdout);
-  assert.equal(summary.ready,true);
+  assert.equal(summary.ready,false);
+  assert.equal(summary.platforms.xiaohongshu.ready,true);
+  assert.equal(summary.platforms.douyin.blocker.code,"UPLOAD_STALLED");
   assert.equal(summary.scheduler.uiConcurrency,1);
+});
+
+test("publisher isolates authentication failure to one platform", async () => {
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-auth-isolation-test-"));
+  const log=path.join(root,"events.ndjson");
+  const videoPath=path.join(root,"sample-video.mp4");
+  const packagePath=path.join(root,"package.json");
+  const configPath=path.join(root,"config.json");
+  await fs.promises.writeFile(videoPath,mp4WithDuration(30));
+  await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:2,onboarding:{completed:true},sourceDirectory:root,availablePlatforms:["xiaohongshu","douyin"],defaultPlatforms:["xiaohongshu","douyin"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:2,uploadConcurrency:2}}));
+  await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Auth isolation",xhsTopics:["Test"],douyinTopics:["Test"],cover:{uploadCustomCover:false}}));
+  const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"auth-isolation","xiaohongshu","douyin","--state-root",root],{env:{
+    ...process.env,
+    VIDEO_PUBLISHER_CONFIG:configPath,
+    VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),
+    VIDEO_PUBLISHER_V2_MOCK_LOG:log,
+    VIDEO_PUBLISHER_V2_MOCK_BLOCKERS:JSON.stringify({"douyin:inspect":{code:"AUTH_REQUIRED",message:"mock login required",retryable:false,requiresUser:true}}),
+  }});
+  assert.equal(result.code,10,`${result.stderr}\n${result.stdout}`);
+  const summary=JSON.parse(result.stdout);
+  assert.equal(summary.status,"blocked");
+  assert.equal(summary.platforms.xiaohongshu.ready,true);
+  assert.equal(summary.platforms.douyin.blocker.code,"AUTH_REQUIRED");
+  const events=(await fs.promises.readFile(log,"utf8")).trim().split(/\n/).map(line=>JSON.parse(line));
+  assert.deepEqual(events.filter(item=>item.platform==="douyin").map(item=>item.phase),["inspect","inspect"]);
+});
+
+test("publisher keeps explicit user control as a global stop", async () => {
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-user-control-test-"));
+  const log=path.join(root,"events.ndjson");
+  const videoPath=path.join(root,"sample-video.mp4");
+  const packagePath=path.join(root,"package.json");
+  const configPath=path.join(root,"config.json");
+  await fs.promises.writeFile(videoPath,mp4WithDuration(30));
+  await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:2,onboarding:{completed:true},sourceDirectory:root,availablePlatforms:["xiaohongshu","douyin"],defaultPlatforms:["xiaohongshu","douyin"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:2,uploadConcurrency:2}}));
+  await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"User control stop",xhsTopics:["Test"],douyinTopics:["Test"],cover:{uploadCustomCover:false}}));
+  const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"user-control","xiaohongshu","douyin","--state-root",root],{env:{
+    ...process.env,
+    VIDEO_PUBLISHER_CONFIG:configPath,
+    VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),
+    VIDEO_PUBLISHER_V2_MOCK_LOG:log,
+    VIDEO_PUBLISHER_V2_MOCK_BLOCKERS:JSON.stringify({"douyin:inspect":{code:"USER_CONTROL",message:"mock user takeover",retryable:false,requiresUser:true}}),
+  }});
+  assert.equal(result.code,10,`${result.stderr}\n${result.stdout}`);
+  const summary=JSON.parse(result.stdout);
+  assert.equal(summary.status,"paused_user");
+  const events=(await fs.promises.readFile(log,"utf8")).trim().split(/\n/).map(line=>JSON.parse(line));
+  assert.equal(events.some(item=>item.phase!=="inspect"),false,"no browser phase may start after explicit user control");
 });
 
 test("publisher circuit-breaks all UI mutation after an upload loses Ego", async () => {
@@ -74,12 +133,12 @@ test("publisher circuit-breaks all UI mutation after an upload loses Ego", async
   const videoPath=path.join(root,"sample-video.mp4");
   const packagePath=path.join(root,"package.json");
   const configPath=path.join(root,"config.json");
-  await fs.promises.writeFile(videoPath,"test video fixture");
+  await fs.promises.writeFile(videoPath,mp4WithDuration(30));
   await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:1,onboarding:{completed:true},sourceDirectory:root,defaultPlatforms:["xiaohongshu","douyin"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:2,uploadConcurrency:2}}));
   await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Circuit breaker",xhsTopics:["Test"],douyinTopics:["Test"],cover:{uploadCustomCover:false}}));
-  const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"channel-break","xiaohongshu","douyin","--state-root",root],{env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),VIDEO_PUBLISHER_V2_MOCK_LOG:log,VIDEO_PUBLISHER_V2_MOCK_BROKEN_CHANNEL:"douyin:upload"}});
+  const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"channel-break","xiaohongshu","douyin","--state-root",root],{env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),VIDEO_PUBLISHER_V2_MOCK_LOG:log,VIDEO_PUBLISHER_V2_MOCK_BROKEN_CHANNEL:"douyin:upload",VIDEO_PUBLISHER_V2_MOCK_DELAYS:JSON.stringify({"douyin:upload":5,"xiaohongshu:upload":60})}});
   assert.equal(result.code,0,`${result.stderr}\n${result.stdout}`);
-  assert.match(result.stderr,/UI serial: none \(input channel broken\)/);
+  assert.match(result.stderr,/input channel broken; final verify parallel=2/);
   const events=(await fs.promises.readFile(log,"utf8")).trim().split(/\n/).map(line=>JSON.parse(line));
   assert.equal(events.some(item=>item.phase==="mutate"),false,"no platform may mutate after a shared Ego channel failure");
   assert.equal(events.filter(item=>item.phase==="verify"&&item.event==="start").length,2,"read-only final verification still records page truth");
@@ -91,10 +150,10 @@ test("publisher stops the serial UI queue when a mutator loses Ego", async () =>
   const videoPath=path.join(root,"sample-video.mp4");
   const packagePath=path.join(root,"package.json");
   const configPath=path.join(root,"config.json");
-  await fs.promises.writeFile(videoPath,"test video fixture");
+  await fs.promises.writeFile(videoPath,mp4WithDuration(30));
   await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:1,onboarding:{completed:true},sourceDirectory:root,defaultPlatforms:["xiaohongshu","douyin","bilibili","wechat_channels"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:4,uploadConcurrency:4}}));
   await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Mutation break",xhsTopics:["Test"],douyinTopics:["Test"],bilibiliDescription:"Mutation circuit breaker",bilibiliTags:["Test"],wechatDescription:"Mutation circuit breaker\n\n#Test",wechatTags:["Test"],cover:{uploadCustomCover:false}}));
-  const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"mutation-break","xiaohongshu","douyin","bilibili","wechat_channels","--state-root",root],{env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),VIDEO_PUBLISHER_V2_MOCK_LOG:log,VIDEO_PUBLISHER_V2_MOCK_BROKEN_CHANNEL:"douyin:mutate"}});
+  const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"mutation-break","xiaohongshu","douyin","bilibili","wechat_channels","--state-root",root],{env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),VIDEO_PUBLISHER_V2_MOCK_LOG:log,VIDEO_PUBLISHER_V2_MOCK_BROKEN_CHANNEL:"douyin:mutate",VIDEO_PUBLISHER_V2_MOCK_DELAYS:JSON.stringify({"xiaohongshu:upload":10,"douyin:upload":20,"bilibili:upload":80,"wechat_channels:upload":100})}});
   assert.equal(result.code,0,`${result.stderr}\n${result.stdout}`);
   const events=(await fs.promises.readFile(log,"utf8")).trim().split(/\n/).map(line=>JSON.parse(line));
   const mutationStarts=events.filter(item=>item.phase==="mutate"&&item.event==="start").map(item=>item.platform);
@@ -109,6 +168,30 @@ test("publisher blocks browser work when onboarding is incomplete", async () => 
   const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),path.join(root,"missing-package.json")],{env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath}});
   assert.equal(result.code,1);
   assert.match(result.stderr,/onboarding is incomplete/);
+});
+
+test("inspect-only returns blocked when the Ego input channel is unavailable", async () => {
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-inspect-blocked-test-"));
+  const videoPath=path.join(root,"sample-video.mp4");
+  const packagePath=path.join(root,"package.json");
+  const configPath=path.join(root,"config.json");
+  await fs.promises.writeFile(videoPath,"test video fixture");
+  await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Inspect blocker",xhsTopics:["Test"],cover:{uploadCustomCover:false}}));
+  await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:2,onboarding:{completed:true},sourceDirectory:root,availablePlatforms:["xiaohongshu"],defaultPlatforms:["xiaohongshu"],declarations:{originalityPolicy:"all_videos_original"}}));
+  const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"inspect-blocked","xiaohongshu","--inspect-only","--state-root",root],{env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),VIDEO_PUBLISHER_V2_MOCK_BROKEN_CHANNEL:"xiaohongshu:inspect"}});
+  assert.equal(result.code,10,`${result.stderr}\n${result.stdout}`);
+  assert.equal(JSON.parse(result.stdout).status,"blocked");
+});
+
+test("publisher rejects a job id that can escape the state root", async () => {
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-job-id-test-"));
+  const configPath=path.join(root,"config.json");
+  const escapeName=`escape-${path.basename(root)}`;
+  await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:2,onboarding:{completed:true},sourceDirectory:root,availablePlatforms:["xiaohongshu"],defaultPlatforms:["xiaohongshu"]}));
+  const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),path.join(root,"missing.json"),"--job-id",`../${escapeName}`],{env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath}});
+  assert.equal(result.code,2);
+  assert.match(result.stderr,/--job-id must be/);
+  assert.equal(fs.existsSync(path.join(path.dirname(root),escapeName)),false);
 });
 
 test("publisher rejects platforms that were not configured as available", async () => {
@@ -129,7 +212,7 @@ test("publisher allows an available non-default platform when explicitly selecte
   const packagePath=path.join(root,"package.json");
   const configPath=path.join(root,"config.json");
   const log=path.join(root,"events.ndjson");
-  await fs.promises.writeFile(videoPath,"test video fixture");
+  await fs.promises.writeFile(videoPath,mp4WithDuration(30));
   await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Availability override",douyinTopics:["Test"],cover:{uploadCustomCover:false}}));
   await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:2,onboarding:{completed:true},sourceDirectory:root,availablePlatforms:["xiaohongshu","douyin"],defaultPlatforms:["xiaohongshu"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:2,uploadConcurrency:2}}));
   const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"availability-override","douyin","--state-root",root],{env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),VIDEO_PUBLISHER_V2_MOCK_LOG:log}});
@@ -290,7 +373,7 @@ test("two publishers for the same job produce one winner and one immediate refus
   assert.equal(fs.existsSync(path.join(root,"shared-job","orchestrator.lock")),false);
 });
 
-test("two different jobs under one state root cannot split platform ownership", async () => {
+test("two different jobs under different state roots cannot split platform ownership", async () => {
   const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-global-lock-test-"));
   const configPath=path.join(root,"config.json");
   const log=path.join(root,"events.ndjson");
@@ -304,7 +387,8 @@ test("two different jobs under one state root cannot split platform ownership", 
     packagePaths.push(packagePath);
   }
   const options={env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),VIDEO_PUBLISHER_V2_MOCK_LOG:log}};
-  const argsFor=(packagePath,jobId)=>[path.join(V2_DIR,"publisher.mjs"),packagePath,"global-lock","xiaohongshu","--job-id",jobId,"--state-root",root];
+  const stateRootFor=jobId=>path.join(root,`state-${jobId}`);
+  const argsFor=(packagePath,jobId)=>[path.join(V2_DIR,"publisher.mjs"),packagePath,"global-lock","xiaohongshu","--job-id",jobId,"--state-root",stateRootFor(jobId)];
   const results=await Promise.all([
     run(process.execPath,argsFor(packagePaths[0],"job-a"),options),
     run(process.execPath,argsFor(packagePaths[1],"job-b"),options),
@@ -314,7 +398,7 @@ test("two different jobs under one state root cannot split platform ownership", 
   const refused=results.find(item=>item.code===1);
   assert.equal(JSON.parse(winner.stdout).ready,true);
   assert.match(refused.stderr,/Another video publishing job is already running/);
-  const stateFiles=["job-a","job-b"].filter(jobId=>fs.existsSync(path.join(root,jobId,"state.json")));
+  const stateFiles=["job-a","job-b"].filter(jobId=>fs.existsSync(path.join(stateRootFor(jobId),jobId,"state.json")));
   assert.equal(stateFiles.length,1,"the refused job must not write state");
-  assert.equal(fs.existsSync(path.join(root,".publisher","orchestrator.lock")),false);
+  assert.equal(fs.existsSync(path.join(process.env.VIDEO_PUBLISHER_V2_LOCK_ROOT,"publisher","orchestrator.lock")),false);
 });

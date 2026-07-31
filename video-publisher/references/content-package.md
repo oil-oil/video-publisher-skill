@@ -59,8 +59,7 @@ wechatTags: required hashtag names used to build and verify the description
 
 cover.uploadCustomCover: must be exactly true to authorize existing-cover upload
 cover.vertical3x4Path: absolute 3:4 image path
-cover.horizontal4x3Path: absolute 4:3 image path
-cover.horizontal16x10Path: absolute Bilibili 16:10 image path
+cover.horizontal4x3Path: absolute 4:3 image path; also the Bilibili homepage primary upload source
 ```
 
 Generic aliases are accepted for backward compatibility: `topics` or `tags` may fill some platform lists when the platform-specific list is omitted. Prefer explicit platform fields in new packages so one platform's semantics do not silently affect another.
@@ -79,7 +78,7 @@ When custom covers are enabled, selected platforms require these assets:
 ```text
 Xiaohongshu: vertical3x4Path
 Douyin: vertical3x4Path + horizontal4x3Path
-Bilibili: horizontal16x10Path
+Bilibili: horizontal4x3Path
 WeChat Channels: vertical3x4Path + horizontal4x3Path
 ```
 

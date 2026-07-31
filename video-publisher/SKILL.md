@@ -157,7 +157,7 @@ This Skill does not create or edit cover artwork. When the user supplies existin
 ```text
 Xiaohongshu: 3:4
 Douyin: 3:4 and 4:3
-Bilibili: 16:10
+Bilibili: one exact 4:3 homepage master; the editor can synchronize it to the 16:9 personal-space slot
 WeChat Channels: 3:4 and 4:3
 ```
 
@@ -191,12 +191,12 @@ As of 2026-07-16, real creator-page runs have verified:
 
 - Xiaohongshu: exact title and topic entities, original declaration, optional 3:4 cover receipt, dialog and final-button gates.
 - Douyin: exact title/body and ordered topic entities, simultaneous-publication setting, optional distinct 3:4 and 4:3 cover receipts, and the verified 15-minute media boundary.
-- Bilibili: exact title/description/tag chips, self-made declarations, same-target restore, foreign-draft quarantine, and upload-page recovery. The custom-cover mapping now requires a dedicated 16:10 asset; this ratio change remains pending fresh creator-page acceptance.
+- Bilibili: exact title/description/tag chips, self-made declarations, same-target restore, foreign-draft quarantine, and upload-page recovery. The current creator page treats homepage-recommendation 4:3 as the primary editor and personal-space 16:9 as the synchronized companion. Custom upload therefore uses the exact 4:3 `horizontal4x3Path`.
 - WeChat Channels: stable upload completion, exact description, empty short title, original declaration, optional distinct 3:4 and 4:3 receipts, and Wujie lifecycle recovery.
 
 System-level runs through 2026-07-16 verified four parallel uploads behind the previous cross-platform barrier, one serial UI queue, parallel final verification, atomic state and receipt recovery, account/job/platform lock contention, stale-lock recovery, task-space id recycling, browser loss during upload and mutation, and repeated no-op reruns. Every accepted run kept the final guard armed with zero attempts and did not click final publish.
 
-The 2026-07-17 maintenance revision replaces that barrier with rolling per-platform finalization: a completed platform enters the serial UI queue immediately, while ordinary typed blockers freeze only their own platform. Local integration tests prove early successful-platform mutation, upload-blocker isolation, authentication isolation, and the retained global input-channel circuit breaker. This scheduler change, the account-wide lock path, direct-runner ownership token, fail-closed unknown Douyin duration, WeChat empty-description receipt rule, and Bilibili 16:10 custom-cover mapping remain pending the next applicable real creator-page and full selected-platform regression and must not be described as live-accepted yet.
+The 2026-07-17 maintenance revision replaces that barrier with rolling per-platform finalization: a completed platform enters the serial UI queue immediately, while ordinary typed blockers freeze only their own platform. Local integration tests prove early successful-platform mutation, upload-blocker isolation, authentication isolation, and the retained global input-channel circuit breaker. The 2026-07-31 Bilibili creator-page inspection confirmed that the primary source is the homepage 4:3 editor and the personal-space 16:9 cover is its synchronized companion. The scheduler change, account-wide lock path, direct-runner ownership token, fail-closed unknown Douyin duration, WeChat empty-description receipt rule, and fresh 4:3 Bilibili asset upload remain pending the next applicable full selected-platform regression and must not be described as fully live-accepted yet.
 
 Real creator-page evidence remains the acceptance gate for page-adapter changes. Unit tests cover orchestration, parsing, validation, persistence, and safety contracts but do not accept live selectors. When scheduler, persistence, locking, task-space recovery, shared-browser behavior, or receipts change, repeat the relevant crash/restart scenario and a full selected-platform production regression; a one-platform diagnostic is insufficient.
 

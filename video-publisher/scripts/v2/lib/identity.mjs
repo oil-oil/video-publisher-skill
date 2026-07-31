@@ -24,7 +24,6 @@ export async function buildIdentity(pkg) {
   const paths = [
     pkg.cover?.vertical3x4Path,
     pkg.cover?.horizontal4x3Path,
-    pkg.cover?.horizontal16x10Path,
   ].filter(Boolean).map(value => path.resolve(value));
   const video = { path: videoPath, size: (await fs.promises.stat(videoPath)).size, sha256: await hashFile(videoPath) };
   const assets = [];

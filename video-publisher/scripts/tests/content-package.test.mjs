@@ -99,27 +99,24 @@ test("an existing cover asset needs only its file path and ratio", async () => {
   });
 });
 
-test("Bilibili maps and validates only the dedicated 16:10 cover", async () => {
+test("Bilibili maps and validates the 4:3 homepage master", async () => {
   await withTempDir(async root => {
-    const bilibiliCoverPath = path.join(root, "cover-16x10.png");
-    const oldLandscapePath = path.join(root, "cover-4x3.png");
+    const bilibiliCoverPath = path.join(root, "cover-4x3.png");
     const packagePath = path.join(root, "package.json");
-    await fs.promises.writeFile(bilibiliCoverPath, pngHeader(1280, 800));
-    await fs.promises.writeFile(oldLandscapePath, pngHeader(1440, 1080));
+    await fs.promises.writeFile(bilibiliCoverPath, pngHeader(1440, 1080));
     await fs.promises.writeFile(packagePath, JSON.stringify({
       title: "Bilibili cover test",
       bilibiliDescription: "Description",
       bilibiliTags: ["Test"],
       cover: {
         uploadCustomCover: true,
-        horizontal4x3Path: oldLandscapePath,
-        horizontal16x10Path: bilibiliCoverPath,
+        horizontal4x3Path: bilibiliCoverPath,
       },
     }));
     const pkg = readPackage(packagePath, { config: defaultConfig() });
     assert.deepEqual(validateBilibiliPackage(pkg), []);
     assert.deepEqual(coverAssetsForPlatform(pkg, "bilibili"), [
-      { slot: "landscape", ratio: "16:10", path: bilibiliCoverPath },
+      { slot: "homepage-master", ratio: "4:3", path: bilibiliCoverPath },
     ]);
 
     await fs.promises.writeFile(packagePath, JSON.stringify({
@@ -128,34 +125,33 @@ test("Bilibili maps and validates only the dedicated 16:10 cover", async () => {
       bilibiliTags: ["Test"],
       cover: {
         uploadCustomCover: true,
-        horizontal4x3Path: oldLandscapePath,
       },
     }));
-    const oldOnlyPackage = readPackage(packagePath, { config: defaultConfig() });
-    assert.deepEqual(coverAssetsForPlatform(oldOnlyPackage, "bilibili"), []);
+    const missingCoverPackage = readPackage(packagePath, { config: defaultConfig() });
+    assert.deepEqual(coverAssetsForPlatform(missingCoverPackage, "bilibili"), []);
     assert.match(
-      validateBilibiliPackage(oldOnlyPackage).join("; "),
+      validateBilibiliPackage(missingCoverPackage).join("; "),
       /no cover asset is mapped for bilibili/,
     );
   });
 });
 
-test("Bilibili rejects a 4:3 image in the dedicated 16:10 cover field", async () => {
+test("Bilibili rejects a 16:9 image in the 4:3 primary cover field", async () => {
   await withTempDir(async root => {
-    const wrongCoverPath = path.join(root, "cover-4x3.png");
+    const wrongCoverPath = path.join(root, "cover-16x9.png");
     const packagePath = path.join(root, "package.json");
-    await fs.promises.writeFile(wrongCoverPath, pngHeader(1440, 1080));
+    await fs.promises.writeFile(wrongCoverPath, pngHeader(1280, 720));
     await fs.promises.writeFile(packagePath, JSON.stringify({
       title: "Bilibili cover test",
       bilibiliDescription: "Description",
       bilibiliTags: ["Test"],
       cover: {
         uploadCustomCover: true,
-        horizontal16x10Path: wrongCoverPath,
+        horizontal4x3Path: wrongCoverPath,
       },
     }));
     const errors = validateBilibiliPackage(readPackage(packagePath, { config: defaultConfig() }));
-    assert.match(errors.join("; "), /expected 16:10, got 1440x1080/);
+    assert.match(errors.join("; "), /expected 4:3, got 1280x720/);
   });
 });
 

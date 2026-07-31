@@ -69,7 +69,6 @@ export function ratioOk(dimensions, expected) {
   const target = {
     "3:4": 3 / 4,
     "4:3": 4 / 3,
-    "16:10": 16 / 10,
   }[expected];
   if (!target) return false;
   return Math.abs(actual - target) < 0.01;
@@ -83,14 +82,13 @@ export function coverAssetsForPlatform(pkg, platform) {
   const cover = pkg.cover || {};
   const verticalPath = String(cover.vertical3x4Path || "").trim();
   const horizontalPath = String(cover.horizontal4x3Path || "").trim();
-  const bilibiliPath = String(cover.horizontal16x10Path || "").trim();
   const mapping = {
     xiaohongshu: verticalPath ? [{ slot: "portrait", ratio: "3:4", path: verticalPath }] : [],
     wechat_channels: [
       ...(verticalPath ? [{ slot: "portrait", ratio: "3:4", path: verticalPath }] : []),
       ...(horizontalPath ? [{ slot: "landscape", ratio: "4:3", path: horizontalPath }] : []),
     ],
-    bilibili: bilibiliPath ? [{ slot: "landscape", ratio: "16:10", path: bilibiliPath }] : [],
+    bilibili: horizontalPath ? [{ slot: "homepage-master", ratio: "4:3", path: horizontalPath }] : [],
     douyin: [
       ...(verticalPath ? [{ slot: "portrait", ratio: "3:4", path: verticalPath }] : []),
       ...(horizontalPath ? [{ slot: "landscape", ratio: "4:3", path: horizontalPath }] : []),
@@ -120,7 +118,6 @@ export function readPackage(packagePath, { config: suppliedConfig } = {}) {
     uploadCustomCover: parsed.cover?.uploadCustomCover === true,
     vertical3x4Path: String(parsed.cover?.vertical3x4Path || "").trim(),
     horizontal4x3Path: String(parsed.cover?.horizontal4x3Path || "").trim(),
-    horizontal16x10Path: String(parsed.cover?.horizontal16x10Path || "").trim(),
   };
   const douyinTopicSource = Array.isArray(parsed.douyinTopics)
     ? parsed.douyinTopics

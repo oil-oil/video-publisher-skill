@@ -82,7 +82,7 @@ If Bilibili reports that a requested tag is topic-only and cannot be added as a 
 
 ## Custom Cover
 
-Use the user-provided `16:10` asset from `cover.horizontal16x10Path` only when enabled.
+Use the user-provided exact `4:3` homepage master from `cover.horizontal4x3Path` only when enabled. Bilibili’s current editor maintains two outputs: `首页推荐封面（4:3）` and `个人空间封面（16:9）`. The 4:3 editor is primary and can synchronize its changes to the 16:9 personal-space slot.
 
 Upload through the active `.bcc-upload-wrapper` image input. The cover editor’s final control can be a `div.button.submit`, not a native button. Wait until its exact label becomes `完成`, click it through the real input channel, and require the editor to close.
 
@@ -101,10 +101,10 @@ video fully uploaded
 exact title and description
 exact requested tag chips plus only allowed auto-tags
 both declaration states
-custom 16:10 receipt when enabled
+custom 4:3 source receipt covering the homepage 4:3 and synchronized space 16:9 slots when enabled
 no blocking dialog
 visible enabled 立即投稿 button
 final publish not clicked
 ```
 
-The complete draft path passed real testing on 2026-07-14, including foreign-draft quarantine, the scoped cover-completion fallback, checkpoint recovery, and repeated no-op verification. The dedicated 16:10 cover mapping is locally tested but still requires a fresh creator-page acceptance run.
+The complete draft path passed real testing on 2026-07-14, including foreign-draft quarantine, the scoped cover-completion fallback, checkpoint recovery, and repeated no-op verification. On 2026-07-31, the current Bilibili production frontend was inspected directly: it labels the primary editor as homepage 4:3, recommends at least 1200 × 900, labels the companion editor as personal-space 16:9, and prompts to synchronize 4:3 changes to 16:9. The corrected 4:3 package mapping is locally tested; a fresh automated 4:3 upload still requires creator-page acceptance.

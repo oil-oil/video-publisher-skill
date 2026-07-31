@@ -88,11 +88,11 @@ Map user-supplied cover files this way:
 ```text
 Xiaohongshu: 3:4 portrait
 WeChat Channels: both 3:4 portrait and 4:3 landscape
-Bilibili: 16:10 landscape
+Bilibili: 4:3 landscape homepage master
 Douyin: both 3:4 portrait and 4:3 landscape
 ```
 
-When oil-cover outputs are supplied, use `<视频名>_16x10.png` as Bilibili’s `cover.horizontal16x10Path`.
+When oil-cover outputs are supplied, use `<视频名>_4x3.png` as Bilibili’s `cover.horizontal4x3Path`.
 
 ## Proposal Shape
 
@@ -128,7 +128,7 @@ B站 tags:
 B站允许保留的平台自动 tags: 留空，除非用户明确确认
 视频号描述:
 视频号 tags:
-封面: 使用平台默认封面；若本轮明确要求上传已有封面，则记录所需 3:4/4:3/16:10 文件路径
+封面: 使用平台默认封面；若本轮明确要求上传已有封面，则记录所需 3:4/4:3 文件路径
 平台:
 是否使用字幕版:
 ```

@@ -5,7 +5,7 @@ const bilibiliAllowedAutoTags = pkg.bilibiliAllowedAutoTags;
 const bilibiliVideoName = videoPath.split('/').pop();
 const bilibiliVideoStem = bilibiliVideoName.replace(/\.[^.]+$/,'');
 const bilibiliCustomCover = pkg.cover?.uploadCustomCover === true;
-const bilibiliCoverPath = String(pkg.cover?.horizontal16x10Path || '');
+const bilibiliCoverPath = String(pkg.cover?.horizontal4x3Path || '');
 
 async function inspectBilibili() {
   const state=await js(String.raw`((expectedName,expectedStem,expectedTitle,expectedDescription,requestedTags,allowedAutoTags) => {
@@ -26,7 +26,7 @@ async function inspectBilibili() {
     return {text:text.slice(0,3000),title,desc,chips,missing,duplicates:[...new Set(duplicates)],malformed:[...new Set(malformed)],unexpected:[...new Set(unexpected)],creationInput,noMark,selfMade,anyUploaded,uploaded,uploading,failed,filenameVisible,loginRequired,restoreBanner,identityMatches,coverUrls:[...new Set(urls)],dialogs}
   })(${JSON.stringify(bilibiliVideoName)},${JSON.stringify(bilibiliVideoStem)},${JSON.stringify(bilibiliTitle)},${JSON.stringify(bilibiliDescription)},${JSON.stringify(bilibiliTags)},${JSON.stringify(bilibiliAllowedAutoTags)})`);
   const buttons=await inspectFinalButtons(/^立即投稿$/);const finalButton=buttons.find(button=>button.buttonish)||buttons[0]||null;const receipt=expectedReceipts.cover||null;
-  const customCoverOk=Boolean(bilibiliCustomCover&&receipt&&receipt.assetPath===bilibiliCoverPath&&receipt.ratio==='16:10'&&receipt.afterUrl&&state.coverUrls.includes(receipt.afterUrl));
+  const customCoverOk=Boolean(bilibiliCustomCover&&receipt&&receipt.assetPath===bilibiliCoverPath&&receipt.ratio==='4:3'&&receipt.afterUrl&&state.coverUrls.includes(receipt.afterUrl));
   const defaultCoverOk=!bilibiliCustomCover&&(/封面设置|更换封面|封面/.test(state.text));
   return {gates:{
     authenticated:state.loginRequired?failedGate({loginRequired:true}):okGate({url:PLATFORM_URLS.bilibili}),
@@ -223,7 +223,7 @@ async function uploadBilibiliCoverV2(){
   const afterUrl=after.find(url=>!before.includes(url))||after.find(url=>/archive\.biliimg|biliimg/.test(url))||after[0];
   if(!dialogClosed)return {ok:false,reason:'bilibili cover editor did not close after confirmation',before,after,frameworkFallbackUsed};
   if(!afterUrl)return {ok:false,reason:'bilibili main cover did not expose CDN receipt',before,after};
-  return {ok:true,frameworkFallbackUsed,primaryClickError,receipt:{assetPath:bilibiliCoverPath,ratio:'16:10',beforeUrls:before,afterUrl}};
+  return {ok:true,frameworkFallbackUsed,primaryClickError,receipt:{assetPath:bilibiliCoverPath,ratio:'4:3',slots:['homepage-4:3','space-16:9'],beforeUrls:before,afterUrl}};
 }
 
 async function mutateBilibili(){

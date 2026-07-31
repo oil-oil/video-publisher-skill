@@ -4,29 +4,28 @@ Use this file only when the user explicitly asks to upload cover files that alre
 
 ## Package Fields
 
-Only include the ratios required by the selected platforms. Recommended dimensions are 1080 × 1440 for 3:4, 1440 × 1080 for 4:3, and 1280 × 800 for Bilibili 16:10.
+Only include the ratios required by the selected platforms. Recommended dimensions are 1080 × 1440 for 3:4 and 1440 × 1080 for 4:3. Bilibili’s primary homepage cover is 4:3 and should be at least 1200 × 900.
 
 ```json
 {
   "cover": {
     "uploadCustomCover": true,
     "vertical3x4Path": "/absolute/path/cover-3x4.png",
-    "horizontal4x3Path": "/absolute/path/cover-4x3.png",
-    "horizontal16x10Path": "/absolute/path/cover-16x10.png"
+    "horizontal4x3Path": "/absolute/path/cover-4x3.png"
   }
 }
 ```
 
 `uploadCustomCover` must be explicitly true. Merely providing paths does not authorize upload.
 
-When the supplied cover comes from oil-cover, map `<视频名>_16x10.png` to `horizontal16x10Path` for Bilibili.
+When the supplied cover comes from oil-cover, map `<视频名>_4x3.png` to `horizontal4x3Path` for Bilibili. The editor uses this as the homepage-recommendation primary cover and can synchronize it to the personal-space 16:9 slot.
 
 Mapping:
 
 ```text
 Xiaohongshu: vertical 3:4
 Douyin: vertical 3:4 and horizontal 4:3
-Bilibili: horizontal 16:10
+Bilibili: horizontal 4:3 homepage master
 WeChat Channels: vertical 3:4 and horizontal 4:3
 ```
 

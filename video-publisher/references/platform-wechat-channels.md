@@ -8,9 +8,9 @@ Read `platform-common.md` and `ego-browser-workflow.md` first.
 - Upload completion and draft identity
 - Text, original declaration, custom covers, and required gates
 
-## Current Acceptance Boundary
+## 当前验收边界
 
-As of 2026-07-16, the platform-specific path and full production orchestrator passed upload completion, exact description, empty short title, original declaration, 3:4 personal-profile and 4:3 share-card custom covers, stale cover-editor recovery, task-space replacement, no blocking dialog, enabled `发表`, and `finalPublishClicked: false`.
+截至 2026-08-01，平台专用流程已通过上传完成、精确描述、空短标题、原创声明、个人主页 3:4 与分享卡片 4:3 自定义封面、旧封面编辑器恢复、任务空间替换、无阻塞弹窗、`发表` 按钮可用和 `finalPublishClicked: false` 验证。126 MB 真实视频还证明：平台显示 `生成中` 时，描述和短标题控件已经可编辑。
 
 ## Wujie Lifecycle
 
@@ -46,7 +46,17 @@ Cover cards can appear before upload completes. A real run displayed:
 
 That state is uploading, not ready.
 
-Require cover cards and the absence of all progress signals, including percentage text and `取消上传`, for a stable interval before the upload runner exits. If an existing target upload is in progress, wait for it; do not inject again.
+Require cover cards and the absence of all progress signals, including percentage text, `取消上传`, `正在处理文件`, `处理中` and `生成中`, for a stable interval before the upload runner exits. If an existing target upload is in progress, wait for it; do not inject again.
+
+## 上传中预填
+
+当页面同时证明视频仍在上传或生成封面，并且描述、短标题控件可见时，`upload_start` 返回 `editable_uploading`。随后通过单宽 UI 队列执行 `prefill`：
+
+1. 写入精确的视频号描述。
+2. 保持短标题为空。
+3. 不操作原创声明、封面、活动、定时发表和最终 `发表`。
+
+由于视频号页面不提供可靠文件名，上传启动回执必须同时绑定包指纹和任务空间 id。只有描述已经精确匹配，或存在匹配的上传启动回执时，才允许预填。快速视频可能在预填进程启动前完成平台处理；此时仍可安全预填，但不得宣称写入发生在上传中。
 
 A 533 MB fault test terminated the orchestrator during the Wujie upload. The same task space resumed with action mode `resume_existing`, reactivated the page lifecycle while waiting, completed without reinjection, and later reached `READY` with both cover slots verified.
 

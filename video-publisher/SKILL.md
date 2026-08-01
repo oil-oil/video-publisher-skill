@@ -60,12 +60,13 @@ Schedule by resource type:
 
 ```text
 read-only inspect: parallel, default 4
-video upload and platform processing wait: parallel, default 4
+video upload start and platform processing wait: parallel, default 4
+live-proven early metadata prefill: serial, exactly 1
 rolling post-upload mutation and final verification: serial, exactly 1
 input-channel circuit-breaker verification: parallel, default 4
 ```
 
-There is no cross-platform upload barrier. As soon as one platform proves its own upload complete, enqueue that platform for metadata, topic, declaration, setting, cover mutation, and fresh verification through the single UI queue. A slow upload or typed platform blocker freezes only that platform; it must not delay a successful sibling. An upload runner may report success only after the platform proves completion. A preview card alone is insufficient when progress text, a percentage, processing text, or `取消上传` remains visible.
+平台之间没有“全部上传完再填写”的屏障。抖音在上传中提前填写标题、描述、话题和同步设置；小红书提前填写标题和话题；B 站提前填写标题和标签；视频号提前填写描述并清空短标题。所有封面、原创声明、B 站简介与创作声明、最终修复和独立验证都必须等视频上传完成。`upload_start` 只证明上传已启动且对应编辑控件可用，不代表上传成功；正式 `upload` 仍只能在平台证明完成后返回成功。
 
 Treat `USER_CONTROL` and `INPUT_CHANNEL_BROKEN` as the two global stop conditions. Authentication, upload, risk-control, selector, asset, and draft blockers remain platform-local. If an active runner returns `INPUT_CHANNEL_BROKEN`, let already-started work settle, start no new quarantine, upload, or mutation, and run only the still-missing final read-only verification so the persisted job records page truth. Resume through the ordinary same-job command after Ego restarts. If Ego reports `USER_CONTROL`, stop all browser work until the user explicitly asks to continue.
 
@@ -100,6 +101,8 @@ The platform runner exposes only these phases:
 ```text
 inspect: read page truth; no mutation
 quarantine: Bilibili only; resolve or preserve an old draft
+upload_start: 四个平台；注入或恢复视频，出现上传中可编辑证据后立即返回
+prefill: 四个平台；仅填写各平台已实测稳定的上传中字段，不上传封面
 upload: upload only when the target video is not already present
 mutate: repair metadata, entities, declarations, settings, and covers
 verify: independently re-read every required gate
@@ -161,7 +164,7 @@ Bilibili: one exact 4:3 homepage master; the editor can synchronize it to the 16
 WeChat Channels: 3:4 and 4:3
 ```
 
-Run `scripts/check-package.mjs` for every selected platform before browser work. For Douyin, require a valid MP4/M4V/MOV duration readable from ISO BMFF metadata, fail closed when duration cannot be verified, and reject content above 900 seconds plus 0.1 seconds of container-rounding tolerance before Ego Lite starts. Do not automatically trim, transcode, or substitute media. This rule is platform-specific and must not block other valid selected platforms.
+Run `scripts/check-package.mjs` for every selected platform before browser work. For Douyin, require a valid MP4/M4V/MOV duration readable from ISO BMFF metadata and fail closed when duration cannot be verified. Do not impose a local duration ceiling; let the current creator page accept or reject the exact verified source. Do not automatically trim, transcode, or substitute media.
 
 ## Default Flow
 
@@ -172,10 +175,11 @@ Run `scripts/check-package.mjs` for every selected platform before browser work.
 5. Validate each platform package.
 6. Run the production orchestrator.
 7. Let it inspect in parallel and quarantine Bilibili when required.
-8. Let all missing video uploads run in parallel.
-9. As each platform proves upload completion, let the single rolling UI queue repair its metadata, declarations, settings, and covers, then independently verify it.
-10. Freeze a typed-blocked platform without delaying or revisiting successful siblings; keep only shared input loss and explicit user control as global stops.
-11. Leave every verified draft open before its final button.
+8. 并行启动所有缺失的视频上传；任一平台同时证明“仍在上传”和“已实测字段可编辑”后，就从 `upload_start` 返回。
+9. 立即通过单宽 UI 队列执行对应平台的 `prefill`，随后恢复上传完成等待；封面和未实测字段不得提前。
+10. As each platform proves upload completion, let the single rolling UI queue repair remaining metadata, declarations, settings, and covers, then independently verify it.
+11. Freeze a typed-blocked platform without delaying or revisiting successful siblings; keep only shared input loss and explicit user control as global stops.
+12. Leave every verified draft open before its final button.
 
 For read-only job inspection:
 
@@ -196,7 +200,7 @@ As of 2026-07-16, real creator-page runs have verified:
 
 System-level runs through 2026-07-16 verified four parallel uploads behind the previous cross-platform barrier, one serial UI queue, parallel final verification, atomic state and receipt recovery, account/job/platform lock contention, stale-lock recovery, task-space id recycling, browser loss during upload and mutation, and repeated no-op reruns. Every accepted run kept the final guard armed with zero attempts and did not click final publish.
 
-The 2026-07-17 maintenance revision replaces that barrier with rolling per-platform finalization: a completed platform enters the serial UI queue immediately, while ordinary typed blockers freeze only their own platform. Local integration tests prove early successful-platform mutation, upload-blocker isolation, authentication isolation, and the retained global input-channel circuit breaker. The 2026-07-31 Bilibili creator-page inspection confirmed that the primary source is the homepage 4:3 editor and the personal-space 16:9 cover is its synchronized companion. The scheduler change, account-wide lock path, direct-runner ownership token, fail-closed unknown Douyin duration, WeChat empty-description receipt rule, and fresh 4:3 Bilibili asset upload remain pending the next applicable full selected-platform regression and must not be described as fully live-accepted yet.
+2026-08-01 使用 126 MB、约 5 分钟的真实视频完成上传时机采样：抖音在上传约 1 秒后即可填写标题、描述、话题和同步设置，并已完成一次上传中真实写入；小红书在上传开始后即可编辑标题和话题；B 站在上传开始后可稳定编辑标题和标签；视频号在 `生成中` 阶段已证明描述和短标题控件可编辑，并完成真实预填。四个平台均已启用串行 `prefill`，封面和 READY 仍保持完成后验证。视频号的快速样本在预填进程启动前已完成平台处理，但仍省去了正式上传阶段的稳定等待；四平台调度与字段边界已通过本地集成和契约测试。仍需下一次完整多平台真实回归后，才能描述为系统级完全验收。
 
 Real creator-page evidence remains the acceptance gate for page-adapter changes. Unit tests cover orchestration, parsing, validation, persistence, and safety contracts but do not accept live selectors. When scheduler, persistence, locking, task-space recovery, shared-browser behavior, or receipts change, repeat the relevant crash/restart scenario and a full selected-platform production regression; a one-platform diagnostic is insufficient.
 

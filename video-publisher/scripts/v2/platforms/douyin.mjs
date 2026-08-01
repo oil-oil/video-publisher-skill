@@ -10,9 +10,14 @@ const douyinCoverAssets = [
 async function inspectDouyin() {
   const state = await js(String.raw`((expectedTitle, expectedDescription, requestedTopics) => {
     const compact = value => String(value || '').replace(/\s+/g, ' ').trim()
-    const visible = el => { const r=el.getBoundingClientRect(),s=getComputedStyle(el); return r.width>4&&r.height>4&&s.display!=='none'&&s.visibility!=='hidden' }
+    const visible = el => {
+      if (!el) return false
+      const r=el.getBoundingClientRect(),s=getComputedStyle(el)
+      return r.width>4&&r.height>4&&s.display!=='none'&&s.visibility!=='hidden'
+    }
     const text = compact(document.body.innerText || '')
-    const title = String([...document.querySelectorAll('input')].find(el => (el.placeholder || '').includes('作品标题'))?.value || '').trim()
+    const titleInput = [...document.querySelectorAll('input')].find(el => (el.placeholder || '').includes('作品标题'))
+    const title = String(titleInput?.value || '').trim()
     const editables = [...document.querySelectorAll('[contenteditable="true"], [contenteditable=""]')]
       .filter(visible)
       .map(el => {
@@ -59,6 +64,9 @@ async function inspectDouyin() {
     const syncRadios=[...document.querySelectorAll('label')].map(el=>({text:compact(el.innerText||el.textContent||''),input:el.querySelector('input.radio-native-p6VBGt,input[type="checkbox"]')})).filter(item=>/^(不同时发布|同时发布到)/.test(item.text))
     const noSyncChecked=Boolean(syncRadios.find(item=>item.text.startsWith('不同时发布'))?.input?.checked)
     const simultaneousChecked=Boolean(syncRadios.find(item=>item.text.startsWith('同时发布到'))?.input?.checked)
+    const topicControlReady=[...document.querySelectorAll('button,[role="button"],div,span')]
+      .some(el=>visible(el)&&compact(el.innerText||el.textContent||'')==='#添加话题')
+    const earlyMutationReady=visible(titleInput)&&visible(editor)&&topicControlReady&&syncRadios.length>0&&(uploading||uploadSucceeded)
     const coverUrls = {}
     for (const [slot,re] of [['landscape',/横封面\s*4\s*:\s*3|横封面4:3/],['portrait',/竖封面\s*3\s*:\s*4|竖封面3:4/]]) {
       const card=[...document.querySelectorAll('.coverControl-CjlzqC')].find(el=>re.test(compact(el.innerText||el.textContent||'')))
@@ -69,7 +77,7 @@ async function inspectDouyin() {
     const dialogs=[...document.querySelectorAll('[role="dialog"],.semi-modal,[class*="modal-mask"],[class*="dialog-mask"]')]
       .map(el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return {text:compact(el.innerText||el.textContent||'').slice(0,500),cls:String(el.className||''),w:r.width,h:r.height,display:s.display,visibility:s.visibility,opacity:s.opacity}})
       .filter(item=>item.w>20&&item.h>20&&item.display!=='none'&&item.visibility!=='hidden'&&!/animate-hide|leave-active/.test(item.cls))
-    return {text:text.slice(0,2800),title,editorText,prose,selected,plainResidue,duplicates,tokenCounts,uploadSucceeded,uploading,uploadFailed,loginRequired,resumeDialog,identityMatches,identityEmpty,knownMisroutedInput,syncOn,syncFound:Boolean(sync),noSyncChecked,simultaneousChecked,coverUrls,dialogs}
+    return {text:text.slice(0,2800),title,editorText,prose,selected,plainResidue,duplicates,tokenCounts,uploadSucceeded,uploading,uploadFailed,loginRequired,resumeDialog,identityMatches,identityEmpty,knownMisroutedInput,syncOn,syncFound:Boolean(sync),noSyncChecked,simultaneousChecked,topicControlReady,earlyMutationReady,titleInputReady:visible(titleInput),editorReady:visible(editor),settingsReady:syncRadios.length>0,coverUrls,dialogs}
   })(${JSON.stringify(douyinTitle)}, ${JSON.stringify(douyinDescription)}, ${JSON.stringify(douyinTopics)})`);
   const buttons = await inspectFinalButtons(/^发布$/);
   const finalButton = buttons.find(button=>button.buttonish) || buttons[0] || null;
@@ -93,8 +101,78 @@ async function inspectDouyin() {
       noBlockingDialog: state.dialogs.length===0 ? okGate({active:[]}) : failedGate({active:state.dialogs}),
       finalButton: finalButton&&!finalButton.disabled ? okGate(finalButton) : failedGate({buttons}),
     },
-    evidence:{pageSample:state.text},
+    evidence:{
+      pageSample:state.text,
+      earlyMutation:{
+        ready:state.earlyMutationReady,
+        uploading:state.uploading,
+        uploadComplete:state.uploadSucceeded&&!state.uploading&&!state.uploadFailed,
+        titleReady:state.titleInputReady,
+        editorReady:state.editorReady,
+        topicControlReady:state.topicControlReady,
+        settingsReady:state.settingsReady,
+      },
+    },
   };
+}
+
+async function discardDouyinResumeDialog(before) {
+  if (!before.gates.video.evidence?.resumeDialog) return { ok: true, skipped: true };
+  const point=await js(String.raw`(() => {const c=v=>String(v||'').replace(/\s+/g,' ').trim();const item=[...document.querySelectorAll('button,[role="button"],div,span')].map(el=>({el,text:c(el.innerText||el.textContent||''),r:el.getBoundingClientRect()})).filter(x=>x.text==='放弃'&&x.r.width>12&&x.r.height>=8&&x.r.width<160&&x.r.height<70).sort((a,b)=>a.r.width*a.r.height-b.r.width*b.r.height)[0];if(!item)return null;const r=item.r;return{x:r.left+r.width/2,y:r.top+r.height/2}})()`);
+  if (!point) return { ok: false, reason: 'douyin discard button missing' };
+  try {
+    await click([point.x,point.y],{label:'discard stale douyin upload'});
+  } catch (error) {
+    return { ok: false, reason: String(error?.message || error) };
+  }
+  await wait(1.5);
+  return { ok: true, changed: true };
+}
+
+async function exposeDouyinVideoInput() {
+  return await js(String.raw`(() => { const input=[...document.querySelectorAll('input[type=file]')].find(el=>/video|\.mp4|\.mov|\.mkv|\.flv/i.test(el.accept||'')); if(!input)return {ok:false,reason:'douyin video input missing'}; input.value=''; input.id='vp2-douyin-video'; return {ok:true,selector:'#vp2-douyin-video'} })()`);
+}
+
+async function waitDouyinEarlyMutationReady(mode) {
+  let current = await inspectDouyin();
+  for (let attempt=0; attempt<30; attempt+=1) {
+    if (current.gates.video.ok) {
+      return {...current,actions:{upload:{mode,stage:'complete',earlyMutationReady:false}}};
+    }
+    const video=current.gates.video.evidence||{};
+    if (video.failed===true&&!video.uploading) {
+      return {...current,actions:{upload:{mode,stage:'explicit_failure',earlyMutationReady:false}},blocker:typedBlocker('PLATFORM_REJECTED_ASSET','抖音在上传启动阶段明确显示失败',{retryable:true,evidence:video})};
+    }
+    if (video.uploading===true&&current.evidence?.earlyMutation?.ready===true) {
+      return {...current,actions:{upload:{mode,stage:'editable_uploading',earlyMutationReady:true}}};
+    }
+    await wait(1);
+    current=await inspectDouyin();
+  }
+  const video=current.gates.video.evidence||{};
+  const early=current.evidence?.earlyMutation||{};
+  const blocker=video.uploading===true
+    ? typedBlocker('SELECTOR_DRIFT','抖音视频已开始上传，但提前填写所需编辑控件没有在等待窗口内全部出现',{retryable:true,evidence:{video,early}})
+    : typedBlocker('UPLOAD_NOT_STARTED','抖音文件注入后没有出现上传进度或已完成证据',{retryable:true,evidence:{video,early}});
+  return {...current,actions:{upload:{mode,stage:'not_editable',earlyMutationReady:false}},blocker};
+}
+
+async function startDouyinUpload() {
+  let before=await inspectDouyin();
+  if(before.gates.video.ok)return {...before,actions:{upload:{mode:'already_ready',stage:'complete',earlyMutationReady:false}}};
+  if(!before.gates.draftIdentity.ok)return {...before,blocker:typedBlocker('FOREIGN_DRAFT','抖音当前编辑器属于其他视频草稿',{evidence:before.gates.draftIdentity.evidence})};
+  if(before.gates.video.evidence?.uploading===true)return await waitDouyinEarlyMutationReady('resume_existing');
+  const discarded=await discardDouyinResumeDialog(before);
+  if(!discarded.ok)return {...before,blocker:typedBlocker('SELECTOR_DRIFT',discarded.reason)};
+  if(discarded.changed)before=await inspectDouyin();
+  const exposed=await exposeDouyinVideoInput();
+  if(!exposed.ok)return {...before,blocker:typedBlocker('SELECTOR_DRIFT',exposed.reason)};
+  try {
+    await uploadFile(exposed.selector,videoPath);
+  } catch (error) {
+    return {...before,blocker:typedBlocker('UPLOAD_NOT_STARTED',String(error?.message||error),{retryable:true})};
+  }
+  return await waitDouyinEarlyMutationReady('injected');
 }
 
 async function waitExistingDouyinUpload() {
@@ -120,14 +198,12 @@ async function uploadDouyin() {
   if(before.gates.video.ok)return {...before,actions:{upload:{mode:'already_ready'}}};
   if(!before.gates.draftIdentity.ok)return {...before,blocker:typedBlocker('FOREIGN_DRAFT','抖音当前编辑器属于其他视频草稿',{evidence:before.gates.draftIdentity.evidence})};
   if(before.gates.video.evidence?.uploading===true)return await waitExistingDouyinUpload();
-  if(before.gates.video.evidence?.resumeDialog){
-    const point=await js(String.raw`(() => {const c=v=>String(v||'').replace(/\s+/g,' ').trim();const item=[...document.querySelectorAll('button,[role="button"],div,span')].map(el=>({el,text:c(el.innerText||el.textContent||''),r:el.getBoundingClientRect()})).filter(x=>x.text==='放弃'&&x.r.width>12&&x.r.height>=8&&x.r.width<160&&x.r.height<70).sort((a,b)=>a.r.width*a.r.height-b.r.width*b.r.height)[0];if(!item)return null;const r=item.r;return{x:r.left+r.width/2,y:r.top+r.height/2}})()`);
-    if(!point)return {...before,blocker:typedBlocker('SELECTOR_DRIFT','douyin discard button missing')};
-    await click([point.x,point.y],{label:'discard stale douyin upload'}).catch(()=>{});await wait(1.5);
-  }
+  const discarded=await discardDouyinResumeDialog(before);
+  if(!discarded.ok)return {...before,blocker:typedBlocker('SELECTOR_DRIFT',discarded.reason)};
+  if(discarded.changed)before=await inspectDouyin();
   const attempts=[];
   for(let attempt=1;attempt<=2;attempt+=1){
-    const exposed=await js(String.raw`(() => { const input=[...document.querySelectorAll('input[type=file]')].find(el=>/video|\.mp4|\.mov|\.mkv|\.flv/i.test(el.accept||'')); if(!input)return {ok:false,reason:'douyin video input missing'}; input.value=''; input.id='vp2-douyin-video'; return {ok:true,selector:'#vp2-douyin-video'} })()`);
+    const exposed=await exposeDouyinVideoInput();
     if(!exposed.ok)return {...before,blocker:typedBlocker('SELECTOR_DRIFT',exposed.reason)};
     try{await uploadFile(exposed.selector,videoPath);}catch(error){return {...before,blocker:typedBlocker('UPLOAD_NOT_STARTED',String(error?.message||error),{retryable:true,evidence:{attempt}})};}
     let stableSince=0;
@@ -370,13 +446,11 @@ async function repairDelayedDouyinCoverReceipt(){
   return {ok:true,receipt,reason:'repaired delayed landscape card after both real slot uploads'};
 }
 
-async function mutateDouyin() {
-  const before = await inspectDouyin();
-  if (!before.gates.video.ok) return { ...before, blocker: typedBlocker('STATE_AMBIGUOUS', '抖音没有可修复的已上传视频') };
+async function ensureDouyinMetadata(before) {
   const actions = {};
   if (!before.gates.title.ok) {
     actions.title = await setDouyinTitle();
-    if (!actions.title.ok) return { ...(await inspectDouyin()), blocker: typedBlocker('ACTION_FAILED', actions.title.reason, { evidence: actions.title }) };
+    if (!actions.title.ok) return { ok:false,actions,blocker:typedBlocker('ACTION_FAILED', actions.title.reason, { evidence: actions.title }) };
   }
   if (!(before.gates.description.ok && before.gates.tags.ok)) {
     const recovered = await recoverDouyinTopicPrefix(before);
@@ -385,19 +459,41 @@ async function mutateDouyin() {
       actions.bodyRecovery = recovered;
       startIndex = recovered.nextIndex;
     } else {
-      if (recovered.recoverable) return { ...(await inspectDouyin()), actions, blocker: typedBlocker('ACTION_FAILED', recovered.reason, { evidence: recovered }) };
-      if ((before.gates.tags.evidence?.selected||[]).length) return { ...(await inspectDouyin()), actions, blocker: typedBlocker('STATE_AMBIGUOUS', recovered.reason, { evidence: recovered }) };
+      if (recovered.recoverable) return { ok:false,actions,blocker:typedBlocker('ACTION_FAILED', recovered.reason, { evidence: recovered }) };
+      if ((before.gates.tags.evidence?.selected||[]).length) return { ok:false,actions,blocker:typedBlocker('STATE_AMBIGUOUS', recovered.reason, { evidence: recovered }) };
       actions.body = await clearAndFillDouyinBody();
-      if (!actions.body.ok) return { ...(await inspectDouyin()), blocker: typedBlocker('ACTION_FAILED', actions.body.reason) };
+      if (!actions.body.ok) return { ok:false,actions,blocker:typedBlocker('ACTION_FAILED', actions.body.reason) };
     }
     for (const tag of douyinTopics.slice(startIndex)) {
       const added = await addDouyinTopic(tag);
       (actions.topics ||= []).push({ tag, ...added });
-      if (!added.ok) return { ...(await inspectDouyin()), actions, blocker: typedBlocker('ACTION_FAILED', added.reason, { evidence: added }) };
+      if (!added.ok) return { ok:false,actions,blocker:typedBlocker('ACTION_FAILED', added.reason, { evidence: added }) };
     }
   }
   actions.settings = await turnOffDouyinSync();
-  if (!actions.settings.ok) return { ...(await inspectDouyin()), blocker: typedBlocker('SELECTOR_DRIFT', actions.settings.reason) };
+  if (!actions.settings.ok) return { ok:false,actions,blocker:typedBlocker('SELECTOR_DRIFT', actions.settings.reason) };
+  return { ok:true,actions };
+}
+
+async function prefillDouyin() {
+  const before=await inspectDouyin();
+  if(!before.gates.draftIdentity.ok)return {...before,blocker:typedBlocker('FOREIGN_DRAFT','抖音当前编辑器属于其他视频草稿',{evidence:before.gates.draftIdentity.evidence})};
+  const early=before.evidence?.earlyMutation||{};
+  if(!before.gates.video.ok&&!(before.gates.video.evidence?.uploading===true&&early.ready===true)){
+    return {...before,blocker:typedBlocker('STATE_AMBIGUOUS','抖音上传中的编辑区尚未满足提前填写条件',{retryable:true,evidence:{video:before.gates.video.evidence,early}})};
+  }
+  const metadata=await ensureDouyinMetadata(before);
+  if(!metadata.ok)return {...(await inspectDouyin()),actions:metadata.actions,blocker:metadata.blocker};
+  const after=await inspectDouyin();
+  return {...after,actions:{...metadata.actions,prefill:{completedDuringUpload:after.gates.video.evidence?.uploading===true}}};
+}
+
+async function mutateDouyin() {
+  const before = await inspectDouyin();
+  if (!before.gates.video.ok) return { ...before, blocker: typedBlocker('STATE_AMBIGUOUS', '抖音没有可修复的已上传视频') };
+  const metadata=await ensureDouyinMetadata(before);
+  if(!metadata.ok)return {...(await inspectDouyin()),actions:metadata.actions,blocker:metadata.blocker};
+  const actions = metadata.actions;
 
   const receipts = {};
   if (douyinCustomCover) {
@@ -447,4 +543,4 @@ async function mutateDouyin() {
   return { ...after, actions, receipts };
 }
 
-async function runPlatformPhase(){if(phase==='inspect'||phase==='verify')return await inspectDouyin();if(phase==='upload')return await uploadDouyin();if(phase==='mutate')return await mutateDouyin();return {...(await inspectDouyin()),blocker:typedBlocker('ACTION_FAILED',`unsupported Douyin phase: ${phase}`)}}
+async function runPlatformPhase(){if(phase==='inspect'||phase==='verify')return await inspectDouyin();if(phase==='upload_start')return await startDouyinUpload();if(phase==='prefill')return await prefillDouyin();if(phase==='upload')return await uploadDouyin();if(phase==='mutate')return await mutateDouyin();return {...(await inspectDouyin()),blocker:typedBlocker('ACTION_FAILED',`unsupported Douyin phase: ${phase}`)}}

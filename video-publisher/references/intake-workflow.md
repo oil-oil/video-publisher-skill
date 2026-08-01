@@ -19,7 +19,7 @@ If it is an HTTP(S) link, ask before downloading unless the link clearly points 
 If the link points to an already-published creator platform post, treat it as a reference and ask for the source video file before uploading.
 ```
 
-Before any browser upload, verify the local file exists with `ls -lh` or `test -f`, then run `scripts/check-package.mjs` for every selected platform. For Douyin, require a readable MP4/M4V/MOV duration and fail closed when it cannot be verified. Reject content above 15:00 before Ego Lite starts, allowing at most 0.1 seconds of container-metadata rounding. Ask for a valid shorter export; never automatically trim or transcode the source. Continue validating the original file for other selected platforms because this rule is Douyin-specific.
+Before any browser upload, verify the local file exists with `ls -lh` or `test -f`, then run `scripts/check-package.mjs` for every selected platform. For Douyin, require a readable MP4/M4V/MOV duration and fail closed only when it cannot be verified. Do not impose a local duration ceiling; let the current creator page accept or reject the verified source and record any explicit platform response.
 
 Before selecting any `原创`, `自制`, or equivalent declaration, require the onboarded `declarations.originalityPolicy` to be `all_videos_original`, or obtain current-video confirmation and pass the one-run `--confirm-original-rights` override. Never infer eligibility from the filename or content. This declaration signal does not change the Skill's no-final-publish boundary.
 
@@ -128,7 +128,7 @@ B站 tags:
 B站允许保留的平台自动 tags: 留空，除非用户明确确认
 视频号描述:
 视频号 tags:
-封面: 使用平台默认封面；若本轮明确要求上传已有封面，则记录所需 3:4/4:3 文件路径
+封面: 使用平台默认封面；若本轮明确要求上传已有封面，则记录所需 3:4/4:3/16:9 文件路径
 平台:
 是否使用字幕版:
 ```

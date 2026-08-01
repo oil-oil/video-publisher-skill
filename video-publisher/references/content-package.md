@@ -60,6 +60,7 @@ wechatTags: required hashtag names used to build and verify the description
 cover.uploadCustomCover: must be exactly true to authorize existing-cover upload
 cover.vertical3x4Path: absolute 3:4 image path
 cover.horizontal4x3Path: absolute 4:3 image path; also the Bilibili homepage primary upload source
+cover.horizontal16x9Path: optional Bilibili personal-space companion; the publisher does not use it as the primary upload source
 ```
 
 Generic aliases are accepted for backward compatibility: `topics` or `tags` may fill some platform lists when the platform-specific list is omitted. Prefer explicit platform fields in new packages so one platform's semantics do not silently affect another.
@@ -68,7 +69,7 @@ Generic aliases are accepted for backward compatibility: `topics` or `tags` may 
 
 ```text
 Xiaohongshu: title <= 20 Unicode code points; at least one xhsTopics item; xhsTopics must not contain `.`
-Douyin: title <= 30 Unicode code points; 1-5 douyinTopics; verifiable MP4/M4V/MOV duration <= 900.1s
+Douyin: title <= 30 Unicode code points; 1-5 douyinTopics; verifiable MP4/M4V/MOV duration
 Bilibili: title <= 80 Unicode code points; bilibiliDescription; 1-10 bilibiliTags
 WeChat Channels: wechatDescription and wechatTags; short title remains empty by default
 ```

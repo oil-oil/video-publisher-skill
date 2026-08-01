@@ -47,6 +47,8 @@ This flow was reproduced from the authenticated creator home page with zero vide
 
 ## Metadata And Declarations
 
+视频上传仍在进行时，只要 fresh inspection 同时证明标题和标签输入控件可见，就可通过单宽 UI 队列提前修复标题与标签。简介、创作声明、原创权益和封面仍必须等上传完成。平台后续自动标签若改变集合，正式 mutation 会再次执行精确修复。
+
 Set and independently verify:
 
 ```text

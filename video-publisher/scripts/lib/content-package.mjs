@@ -69,6 +69,7 @@ export function ratioOk(dimensions, expected) {
   const target = {
     "3:4": 3 / 4,
     "4:3": 4 / 3,
+    "16:9": 16 / 9,
   }[expected];
   if (!target) return false;
   return Math.abs(actual - target) < 0.01;
@@ -118,6 +119,7 @@ export function readPackage(packagePath, { config: suppliedConfig } = {}) {
     uploadCustomCover: parsed.cover?.uploadCustomCover === true,
     vertical3x4Path: String(parsed.cover?.vertical3x4Path || "").trim(),
     horizontal4x3Path: String(parsed.cover?.horizontal4x3Path || "").trim(),
+    horizontal16x9Path: String(parsed.cover?.horizontal16x9Path || "").trim(),
   };
   const douyinTopicSource = Array.isArray(parsed.douyinTopics)
     ? parsed.douyinTopics
@@ -166,6 +168,14 @@ export function validateCoverPackage(pkg, platform) {
   const errors = [];
   const cover = pkg.cover || {};
   if (!coverUploadEnabled(cover)) return errors;
+  if (
+    platform === "bilibili"
+    && !cover.horizontal4x3Path
+    && cover.horizontal16x9Path
+  ) {
+    errors.push("bilibili primary cover requires an exact 4:3 horizontal4x3Path; 16:9 is only a personal-space companion");
+    return errors;
+  }
   const assets = coverAssetsForPlatform(pkg, platform);
   if (!assets.length) {
     errors.push(`custom cover upload enabled, but no cover asset is mapped for ${platform}`);

@@ -26,19 +26,21 @@ Use `scripts/run-safe-platforms.sh`, which invokes `scripts/v2/publisher.mjs`.
 ```text
 1. inspect all selected platforms in parallel
 2. resolve Bilibili restore/foreign-draft state through the serial UI queue
-3. upload missing videos in parallel
-4. whenever one platform proves upload completion, enqueue its finalization immediately
-5. in the single UI queue, mutate that platform and then verify it independently
-6. freeze typed-blocked platforms and continue every eligible sibling without a global upload barrier
+3. start missing videos in parallel
+4. for a live-proven early-edit platform, enqueue metadata prefill through the serial UI queue while upload continues
+5. resume that platform's upload-completion wait
+6. whenever one platform proves upload completion, enqueue its finalization immediately
+7. in the single UI queue, mutate that platform and then verify it independently
+8. freeze typed-blocked platforms and continue every eligible sibling without a global upload barrier
 ```
 
-The rolling scheduler intentionally allows a completed platform to finalize while another platform upload runner is still waiting. Keep all mutation and its paired final verification in the exactly-one-wide UI queue. Earlier live testing showed that overlapping upload processes and UI control can freeze the shared Ego input channel even across isolated task spaces, so this revised tradeoff remains pending a full real selected-platform regression and relies on the global input-channel circuit breaker below.
+`upload_start` 只在上传仍活跃且对应平台的已验证控件可见时返回 `editable_uploading`。`prefill` 的范围为：抖音标题、描述、话题和同步设置；小红书标题和话题；B 站标题和标签；视频号描述和空短标题。它不碰封面、原创声明，也不满足 video gate。正式 `upload` 随后继续等待完成。所有预填、最终修复和对应验证仍通过单宽 UI 队列执行。
 
 Ordinary typed blockers are platform-local: stop scheduling that platform after its blocker, retain its evidence, and continue successful siblings. `AUTH_REQUIRED` therefore freezes only the unauthenticated platform. `USER_CONTROL` remains global because task-space ownership requires all browser work to stop.
 
 The browser channel is shared across task spaces. If any runner reports `INPUT_CHANNEL_BROKEN`, treat it as an invocation-wide circuit breaker: let already-started work settle, start no new quarantine/upload/mutate action, preserve any sibling that already completed rolling verification, and run only still-missing final read-only verification. An ordinary same-job retry after Ego restarts is the recovery path.
 
-Before step 1, validate the exact local media for every selected platform. Douyin requires a valid MP4/M4V/MOV duration readable from ISO BMFF metadata and fails closed when it cannot be verified. It permits only 0.1 seconds of container rounding above the real-tested 900-second limit; anything invalid or longer must be excluded before browser work and recorded as `PLATFORM_REJECTED_ASSET`. Other valid platforms continue through the same run. If none is eligible, fail before job creation. Never silently trim, transcode, or substitute another source.
+Before step 1, validate the exact local media for every selected platform. Douyin requires a valid MP4/M4V/MOV duration readable from ISO BMFF metadata and fails closed when it cannot be verified. Do not impose a local duration ceiling; an explicit creator-page rejection becomes `PLATFORM_REJECTED_ASSET`. Other valid platforms continue through the same run. If none is eligible, fail before job creation. Never silently trim, transcode, or substitute another source.
 
 The maintained adapter runner also takes an atomic per-platform filesystem lock. A second process targeting the same platform fails before opening Ego instead of overlapping with an active upload, mutation, inspection, or verification. Stale locks from dead processes are removed automatically. This still permits the intended four-platform parallel upload/check phases.
 
@@ -51,6 +53,8 @@ Persist the exact task-space name alongside its numeric id. After an Ego crash, 
 ```text
 inspect: read-only page observation
 quarantine: Bilibili-only draft resolution
+upload_start: 四个平台的上传启动或恢复，直到可编辑上传中或完成证据出现
+prefill: 四个平台的上传中安全字段修复
 upload: target video upload and full completion wait
 mutate: idempotent UI repair
 verify: fresh independent observation using stored receipts

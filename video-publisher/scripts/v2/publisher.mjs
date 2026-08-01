@@ -23,6 +23,7 @@ import { runPool, SerialQueue } from "./lib/scheduler.mjs";
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = path.join(os.homedir(), ".video-publisher", "v2-jobs");
 const RIGHTS_PLATFORMS = new Set(["xiaohongshu", "bilibili", "wechat_channels"]);
+const EARLY_PREFILL_PLATFORMS = new Set(["xiaohongshu", "douyin", "bilibili", "wechat_channels"]);
 const validators = { xiaohongshu: validateXiaohongshuPackage, douyin: validateDouyinPackage, bilibili: validateBilibiliPackage, wechat_channels: validateWechatChannelsPackage };
 
 class UsageError extends Error {}
@@ -326,12 +327,29 @@ async function main() {
     return task;
   }
 
-  // Start every missing upload first. Each successful runner immediately feeds the
-  // single post-upload UI queue; a slow or typed-blocked sibling is not a barrier.
+  // Start every missing upload first. Platforms with live-proven editable upload
+  // states may prefill metadata through the same one-wide UI queue, then resume
+  // their completion wait before final mutation and verification.
   const uploadTargets = inputChannelBroken || userControl ? [] : runnablePlatforms.filter(platform => state.platforms[platform].status === "needs_upload");
   console.error(`[video-publisher-v2] upload parallel=${args.uploadConcurrency}: ${uploadTargets.join(",") || "none"}`);
   const uploadPool = runPool(uploadTargets, args.uploadConcurrency, async platform => {
     if (inputChannelBroken || userControl) return;
+    if (EARLY_PREFILL_PLATFORMS.has(platform)) {
+      const started=await invoke(platform, "upload_start");
+      if (inputChannelBroken || userControl || terminalStatuses.has(state.platforms[platform].status)) return;
+      if (started.observation.actions?.upload?.stage === "editable_uploading") {
+        await ui.enqueue(async () => {
+          if (inputChannelBroken || userControl || terminalStatuses.has(state.platforms[platform].status)) return;
+          await invoke(platform, "prefill");
+        });
+        if (inputChannelBroken || userControl || terminalStatuses.has(state.platforms[platform].status)) return;
+      }
+      if (canAdvance(platform)) {
+        scheduleAdvance(platform);
+        return;
+      }
+      if (state.platforms[platform].status !== "needs_upload") return;
+    }
     await invoke(platform, "upload");
     if (!inputChannelBroken && !userControl && canAdvance(platform)) scheduleAdvance(platform);
   });

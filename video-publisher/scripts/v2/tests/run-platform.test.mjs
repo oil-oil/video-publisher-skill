@@ -18,7 +18,7 @@ function box(type,payload){const buffer=Buffer.alloc(8+payload.length);buffer.wr
 function mp4WithDuration(durationSeconds,timescale=1000){const payload=Buffer.alloc(20);payload.writeUInt32BE(timescale,12);payload.writeUInt32BE(Math.round(durationSeconds*timescale),16);return Buffer.concat([box("ftyp",Buffer.alloc(4)),box("moov",box("mvhd",payload))])}
 async function waitFor(predicate,timeoutMs=3000){const started=Date.now();while(Date.now()-started<timeoutMs){if(await predicate())return;await new Promise(resolve=>setTimeout(resolve,25))}throw new Error("timed out waiting for test condition")}
 
-test("platform runner rejects an over-limit Douyin asset before Ego starts",async()=>{
+test("platform runner does not reject verified long-form Douyin asset during media preflight",async()=>{
   const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-direct-duration-test-"));
   const videoPath=path.join(root,"too-long.mp4");
   const packagePath=path.join(root,"package.json");
@@ -27,8 +27,7 @@ test("platform runner rejects an over-limit Douyin asset before Ego starts",asyn
   await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Too long",douyinTopics:["Test"],cover:{uploadCustomCover:false}}));
   await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:2,onboarding:{completed:true},sourceDirectory:root,availablePlatforms:["douyin"],defaultPlatforms:["douyin"],declarations:{originalityPolicy:"all_videos_original"}}));
   const result=await run(process.execPath,[path.join(V2_DIR,"run-platform.mjs"),"douyin",packagePath,"upload"],{env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_EGO_COMMAND:"video-publisher-missing-ego-command"}});
-  assert.equal(result.code,1);
-  assert.match(result.stderr,/DOUYIN_DURATION_LIMIT/);
+  assert.doesNotMatch(result.stderr,/DOUYIN_DURATION_LIMIT/);
 });
 
 test("platform runner rejects an account that is not configured as available",async()=>{

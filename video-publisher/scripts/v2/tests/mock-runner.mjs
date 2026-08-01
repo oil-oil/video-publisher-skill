@@ -10,7 +10,7 @@ const delays = JSON.parse(process.env.VIDEO_PUBLISHER_V2_MOCK_DELAYS || "{}");
 const blockers = JSON.parse(process.env.VIDEO_PUBLISHER_V2_MOCK_BLOCKERS || "{}");
 const at = Date.now();
 if (process.env.VIDEO_PUBLISHER_V2_MOCK_LOG) fs.appendFileSync(process.env.VIDEO_PUBLISHER_V2_MOCK_LOG, JSON.stringify({ at, event: "start", platform, phase }) + "\n");
-const delayMs = Number(delays[phaseKey] ?? (phase === "upload" ? 30 : 0));
+const delayMs = Number(delays[phaseKey] ?? (["upload_start", "upload"].includes(phase) ? 30 : 0));
 if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
 const brokenChannel = process.env.VIDEO_PUBLISHER_V2_MOCK_BROKEN_CHANNEL === phaseKey;
 const configuredBlocker = blockers[phaseKey] || null;
@@ -21,6 +21,13 @@ gates.noBlockingDialog = { ok: true, evidence: {} };
 gates.finalButton = { ok: true, evidence: { text: "final", disabled: false } };
 gates.safety = { ok: true, evidence: { finalPublishClicked: false, guardArmed: true, blockedAttempts: 0 } };
 if (phase === "upload") gates.video = { ok: true, evidence: { stable: true } };
+if (phase === "upload_start") gates.video = { ok: false, evidence: { uploading: true, failed: false } };
+if (phase === "prefill") {
+  gates.video = { ok: false, evidence: { uploading: true, failed: false } };
+  for (const name of ["title", "description", "tags", "settings"]) {
+    if (gates[name]) gates[name] = { ok: true, evidence: {} };
+  }
+}
 if (configuredBlocker?.code === "AUTH_REQUIRED") gates.authenticated = { ok: false, evidence: { reason: "mock authentication required" } };
 if (["UPLOAD_NOT_STARTED", "UPLOAD_STALLED", "PLATFORM_REJECTED_ASSET"].includes(configuredBlocker?.code)) {
   gates.video = { ok: false, evidence: { uploading: configuredBlocker.code === "UPLOAD_STALLED" } };
@@ -42,6 +49,8 @@ const result = {
     ? { blocker: { code: "INPUT_CHANNEL_BROKEN", message: "mock Ego exit", retryable: true, requiresUser: false } }
     : configuredBlocker ? { blocker: configuredBlocker } : {}),
   ...(process.env.VIDEO_PUBLISHER_V2_MOCK_TASK_SPACE_RECREATED === "1" ? { taskSpaceRecovery: { recreated: true, previousTaskSpaceId: taskSpaceId, taskSpaceId } } : {}),
+  ...(phase === "upload_start" ? { actions: { upload: { mode: "injected", stage: "editable_uploading", earlyMutationReady: true } }, evidence: { earlyMutation: { ready: true, uploading: true } } } : {}),
+  ...(phase === "prefill" ? { actions: { prefill: { completedDuringUpload: true } }, evidence: { earlyMutation: { ready: true, uploading: true } } } : {}),
   ...(phase === "mutate" ? { receipts: { cover: { mock: true, taskSpaceId } } } : {}),
 };
 if (process.env.VIDEO_PUBLISHER_V2_MOCK_LOG) fs.appendFileSync(process.env.VIDEO_PUBLISHER_V2_MOCK_LOG, JSON.stringify({ at: Date.now(), event: "end", platform, phase }) + "\n");

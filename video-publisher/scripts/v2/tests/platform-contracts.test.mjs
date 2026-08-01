@@ -42,6 +42,56 @@ test("Douyin preserves committed topic entities while retrying a failed tail que
   assert.match(add, /removeDouyinTrailingTopicQuery\(queryTag,committedBefore\)/, "a failed lookup must remove only its own plain query");
 });
 
+test("Douyin prefill requires live editable-upload evidence and defers covers", () => {
+  const source = fs.readFileSync(path.join(PLATFORM_DIR, "douyin.mjs"), "utf8");
+  const start = source.indexOf("async function prefillDouyin");
+  const end = source.indexOf("async function mutateDouyin", start);
+  assert.ok(start >= 0 && end > start, "Douyin prefill function must remain discoverable");
+  const prefill = source.slice(start, end);
+  assert.match(source, /stage:'editable_uploading'/, "upload start must expose an explicit editable-uploading stage");
+  assert.match(prefill, /early\.ready===true/, "prefill must require freshly proven editor readiness");
+  assert.match(prefill, /video\.evidence\?\.uploading===true/, "prefill must remain bound to an active upload when video is incomplete");
+  assert.match(prefill, /ensureDouyinMetadata\(before\)/, "prefill must use the same idempotent metadata repair as final mutation");
+  assert.doesNotMatch(prefill, /uploadDouyinCoverSlot|repairDelayedDouyinCoverReceipt/, "custom covers stay after upload completion");
+});
+
+test("Xiaohongshu prefill requires live title and topic controls and defers rights and cover", () => {
+  const source = fs.readFileSync(path.join(PLATFORM_DIR, "xiaohongshu.mjs"), "utf8");
+  const start = source.indexOf("async function prefillXiaohongshu");
+  const end = source.indexOf("async function mutateXiaohongshu", start);
+  assert.ok(start >= 0 && end > start);
+  const prefill = source.slice(start, end);
+  assert.match(source, /stage: 'editable_uploading'/);
+  assert.match(source, /controls: \{ title: visible\(titleInput\), topics:/);
+  assert.match(prefill, /ensureXiaohongshuEarlyMetadata\(before\)/);
+  assert.doesNotMatch(prefill, /ensureXhsOriginal|uploadXhsCover/);
+});
+
+test("Bilibili prefill is limited to live title and tag controls", () => {
+  const source = fs.readFileSync(path.join(PLATFORM_DIR, "bilibili.mjs"), "utf8");
+  const start = source.indexOf("async function prefillBilibili");
+  const end = source.indexOf("async function mutateBilibili", start);
+  assert.ok(start >= 0 && end > start);
+  const prefill = source.slice(start, end);
+  assert.match(source, /stage:'editable_uploading'/);
+  assert.match(source, /controls:\{title:visible\(titleInput\),tags:visible\(tagInput\)\}/);
+  assert.match(prefill, /ensureBilibiliEarlyMetadata\(before\)/);
+  assert.doesNotMatch(prefill, /setBilibiliDescriptionV2|ensureBilibiliDeclarationV2|uploadBilibiliCoverV2/);
+});
+
+test("WeChat Channels prefill uses a task-space-bound upload receipt and defers original and covers", () => {
+  const source = fs.readFileSync(path.join(PLATFORM_DIR, "wechat-channels.mjs"), "utf8");
+  const start = source.indexOf("async function prefillWechatChannels");
+  const end = source.indexOf("async function mutateWechatChannels", start);
+  assert.ok(start >= 0 && end > start);
+  const prefill = source.slice(start, end);
+  assert.match(source, /正在处理文件\|处理中\|生成中/, "processing and generated-cover text must keep the upload incomplete");
+  assert.match(source, /uploadStartReceipt\?\.fingerprint===jobFingerprint/);
+  assert.match(source, /completeWechatUploadStartObservation\(current,mode,'editable_uploading'/);
+  assert.match(prefill, /ensureWechatEarlyMetadata\(before\)/);
+  assert.doesNotMatch(prefill, /ensureWechatOriginal|uploadWechatCover/);
+});
+
 test("Ego task-space selection rejects a recycled id with another name", () => {
   const source = fs.readFileSync(path.join(DIR, "..", "ego", "core.mjs"), "utf8");
   const start = source.indexOf("async function selectTaskSpace");
@@ -94,12 +144,13 @@ test("Bilibili uses the 4:3 homepage master and receipt ratio", () => {
   assert.match(source, /receipt\.ratio==='4:3'/);
   assert.match(source, /ratio:'4:3'/);
   assert.match(source, /slots:\['homepage-4:3','space-16:9'\]/);
+  assert.doesNotMatch(source, /pkg\.cover\?\.horizontal16x9Path/);
 });
 
 test("WeChat Channels refuses an unproven uploaded draft with an empty description", () => {
   const source = fs.readFileSync(path.join(PLATFORM_DIR, "wechat-channels.mjs"), "utf8");
   assert.match(source, /identityAmbiguous=uploaded&&!description&&!trustedVideoReceipt/);
   assert.match(source, /expectedVideoReceipt\?\.fingerprint===jobFingerprint/);
-  assert.match(source, /trustedUploadAction:true,mode:'injected'/);
+  assert.match(source, /current\.gates\.draftIdentity=okGate\(\{trustedUploadAction:true,mode,uploadStartReceipt:/);
   assert.match(source, /if\(!before\.gates\.draftIdentity\.ok\)return/);
 });

@@ -7,6 +7,7 @@ const xhsCoverPath = String(pkg.cover?.vertical3x4Path || '');
 async function inspectXiaohongshu() {
   const state = await js(String.raw`((expectedName, expectedTitle, requestedTopics) => {
     const compact = value => String(value || '').replace(/\s+/g, ' ').trim()
+    const visible = el => { if (!el) return false; const r=el.getBoundingClientRect(),s=getComputedStyle(el); return r.width>4&&r.height>4&&s.display!=='none'&&s.visibility!=='hidden' }
     const text = compact(document.body.innerText || '')
     const titleInput = [...document.querySelectorAll('input')]
       .find(el => (el.placeholder || '').includes('填写标题'))
@@ -61,7 +62,14 @@ async function inspectXiaohongshu() {
     const uploading = /封面上传中|视频上传中|取消上传|剩余时间|当前速度|处理中/.test(text)
     const failed = /上传失败|网络错误|重新上传失败/.test(text)
     const loginRequired = /扫码登录|请登录|登录后|安全验证|验证码/.test(text) && !/发布笔记|内容设置/.test(text)
-    return { text: text.slice(0, 2600), title, editorText, selected, topicCounts, plainResidue, duplicate, originalEnabled, activeDialogs, coverBg, filenameVisible, uploaded, uploading, failed, loginRequired }
+    const topicButton = document.querySelector('button.contentBtn.topic-btn, #topicBtn')
+    const earlyMutation = {
+      ready: Boolean(visible(titleInput) && visible(editor) && visible(topicButton)),
+      uploading,
+      uploaded,
+      controls: { title: visible(titleInput), topics: visible(editor) && visible(topicButton) },
+    }
+    return { text: text.slice(0, 2600), title, editorText, selected, topicCounts, plainResidue, duplicate, originalEnabled, activeDialogs, coverBg, filenameVisible, uploaded, uploading, failed, loginRequired, earlyMutation }
   })(${JSON.stringify(xhsVideoName)}, ${JSON.stringify(xhsTitle)}, ${JSON.stringify(xhsTopics)})`);
   const buttons = await inspectFinalButtons(/^(发布|发布笔记)$/);
   const identityOk = !state.uploaded || state.filenameVisible || state.title === xhsTitle;
@@ -93,7 +101,7 @@ async function inspectXiaohongshu() {
       noBlockingDialog: state.activeDialogs.length === 0 ? okGate({ active: [] }) : failedGate({ active: state.activeDialogs }),
       finalButton: finalButton && !finalButton.disabled ? okGate(finalButton) : failedGate({ buttons }),
     },
-    evidence: { pageSample: state.text },
+    evidence: { pageSample: state.text, earlyMutation: state.earlyMutation },
   };
 }
 
@@ -138,6 +146,51 @@ async function uploadXiaohongshu() {
     return { ...before, blocker: typedBlocker('UPLOAD_NOT_STARTED', `小红书文件注入失败: ${String(error?.message || error)}`, { retryable: true }) };
   }
   return await waitXiaohongshuUploadCompletion('injected');
+}
+
+async function waitXiaohongshuEarlyMutationReady(mode) {
+  for (let index = 0; index < 30; index += 1) {
+    const current = await inspectXiaohongshu();
+    if (!current.gates.authenticated.ok) {
+      return { ...current, blocker: typedBlocker('AUTH_REQUIRED', '小红书登录状态失效', { requiresUser: true, evidence: current.gates.authenticated.evidence }) };
+    }
+    if (current.gates.video.ok) return { ...current, actions: { upload: { mode, stage: 'complete', earlyMutationReady: true } } };
+    if (current.gates.video.evidence?.failed === true) {
+      return { ...current, blocker: typedBlocker('UPLOAD_NOT_STARTED', '小红书上传失败', { retryable: true, evidence: current.gates.video.evidence }) };
+    }
+    if (current.gates.video.evidence?.uploading === true && current.evidence?.earlyMutation?.ready === true) {
+      return { ...current, actions: { upload: { mode, stage: 'editable_uploading', earlyMutationReady: true } } };
+    }
+    await wait(1);
+  }
+  const after = await inspectXiaohongshu();
+  return { ...after, blocker: typedBlocker('UPLOAD_NOT_STARTED', '小红书上传启动后编辑区未及时就绪', { retryable: true, evidence: after.evidence?.earlyMutation }) };
+}
+
+async function startXiaohongshuUpload() {
+  const before = await inspectXiaohongshu();
+  if (before.gates.video.ok) return { ...before, actions: { upload: { mode: 'already_ready', stage: 'complete', earlyMutationReady: true } } };
+  if (!before.gates.authenticated.ok) {
+    return { ...before, blocker: typedBlocker('AUTH_REQUIRED', '小红书登录状态失效', { requiresUser: true, evidence: before.gates.authenticated.evidence }) };
+  }
+  if (!before.gates.draftIdentity.ok) {
+    return { ...before, blocker: typedBlocker('FOREIGN_DRAFT', '小红书当前编辑器属于其他视频草稿', { evidence: before.gates.draftIdentity.evidence }) };
+  }
+  if (before.gates.video.evidence?.uploading === true) return await waitXiaohongshuEarlyMutationReady('resume_existing');
+  const exposed = await js(String.raw`(() => {
+    const videoLike = value => /video|\.(mp4|mov|flv|f4v|mkv|rmvb?|m4v|mpg|mpeg|ts)\b/i.test(value || '')
+    const input = [...document.querySelectorAll('input[type=file]')].find(el => videoLike(el.accept))
+    if (!input) return { ok: false, reason: 'xiaohongshu video input missing' }
+    input.id = 'vp2-xhs-video'
+    return { ok: true, selector: '#vp2-xhs-video', accept: input.accept || '' }
+  })()`);
+  if (!exposed.ok) return { ...before, blocker: typedBlocker('SELECTOR_DRIFT', exposed.reason) };
+  try {
+    await uploadFile(exposed.selector, videoPath);
+  } catch (error) {
+    return { ...before, blocker: typedBlocker('UPLOAD_NOT_STARTED', `小红书文件注入失败: ${String(error?.message || error)}`, { retryable: true }) };
+  }
+  return await waitXiaohongshuEarlyMutationReady('injected');
 }
 
 async function activateXhsTopicLifecycle() {
@@ -333,14 +386,45 @@ async function uploadXhsCover() {
   return { ok: true, receipt: { assetPath: xhsCoverPath, ratio: '3:4', beforeUrl: before, afterUrl: url } };
 }
 
+async function ensureXiaohongshuEarlyMetadata(before) {
+  const actions = {};
+  if (!before.gates.title.ok) actions.title = await setNativeInputValue('input[placeholder*="填写标题"]', xhsTitle);
+  let current = await inspectXiaohongshu();
+  if (!current.gates.title.ok) {
+    return { ok: false, actions, current, blocker: typedBlocker('ACTION_FAILED', '小红书标题没有持久化', { evidence: current.gates.title.evidence }) };
+  }
+  if (!current.gates.tags.ok) actions.tags = await rebuildXhsTopics();
+  if (actions.tags && !actions.tags.ok) {
+    current = await inspectXiaohongshu();
+    return { ok: false, actions, current, blocker: typedBlocker('ACTION_FAILED', actions.tags.reason, { evidence: actions.tags }) };
+  }
+  current = await inspectXiaohongshu();
+  return { ok: current.gates.title.ok && current.gates.tags.ok, actions, current };
+}
+
+async function prefillXiaohongshu() {
+  const before = await inspectXiaohongshu();
+  if (!before.gates.authenticated.ok) {
+    return { ...before, blocker: typedBlocker('AUTH_REQUIRED', '小红书登录状态失效', { requiresUser: true, evidence: before.gates.authenticated.evidence }) };
+  }
+  if (!before.gates.draftIdentity.ok) {
+    return { ...before, blocker: typedBlocker('FOREIGN_DRAFT', '小红书当前编辑器属于其他视频草稿', { evidence: before.gates.draftIdentity.evidence }) };
+  }
+  const uploading = before.gates.video.evidence?.uploading === true;
+  if (!before.gates.video.ok && (!uploading || before.evidence?.earlyMutation?.ready !== true)) {
+    return { ...before, blocker: typedBlocker('STATE_AMBIGUOUS', '小红书上传中的编辑区尚未完整就绪', { retryable: true, evidence: before.evidence?.earlyMutation }) };
+  }
+  const metadata = await ensureXiaohongshuEarlyMetadata(before);
+  if (!metadata.ok) return { ...metadata.current, actions: metadata.actions, blocker: metadata.blocker };
+  return { ...metadata.current, actions: { ...metadata.actions, prefill: { completedDuringUpload: uploading } } };
+}
+
 async function mutateXiaohongshu() {
   const before = await inspectXiaohongshu();
   if (!before.gates.video.ok) return { ...before, blocker: typedBlocker('STATE_AMBIGUOUS', '小红书没有可修复的已上传视频') };
-  const actions = {};
-  if (!before.gates.title.ok) actions.title = await setNativeInputValue('input[placeholder*="填写标题"]', xhsTitle);
-  const afterTitle = await inspectXiaohongshu();
-  if (!afterTitle.gates.tags.ok) actions.tags = await rebuildXhsTopics();
-  if (actions.tags && !actions.tags.ok) return { ...(await inspectXiaohongshu()), blocker: typedBlocker('ACTION_FAILED', actions.tags.reason, { evidence: actions.tags }) };
+  const metadata = await ensureXiaohongshuEarlyMetadata(before);
+  if (!metadata.ok) return { ...metadata.current, actions: metadata.actions, blocker: metadata.blocker };
+  const actions = { ...metadata.actions };
   actions.original = await ensureXhsOriginal();
   if (!actions.original.ok) return { ...(await inspectXiaohongshu()), blocker: typedBlocker('ACTION_FAILED', actions.original.reason, { evidence: actions.original }) };
   actions.cover = await uploadXhsCover();
@@ -356,6 +440,8 @@ async function mutateXiaohongshu() {
 
 async function runPlatformPhase() {
   if (phase === 'inspect' || phase === 'verify') return await inspectXiaohongshu();
+  if (phase === 'upload_start') return await startXiaohongshuUpload();
+  if (phase === 'prefill') return await prefillXiaohongshu();
   if (phase === 'upload') return await uploadXiaohongshu();
   if (phase === 'mutate') return await mutateXiaohongshu();
   return { ...(await inspectXiaohongshu()), blocker: typedBlocker('ACTION_FAILED', `unsupported Xiaohongshu phase: ${phase}`) };

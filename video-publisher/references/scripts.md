@@ -37,7 +37,7 @@ bilibili
 wechat_channels
 ```
 
-Validation checks the local video path, Unicode title limits, required platform fields, package-supplied Douyin topics, and requested cover paths and ratios. Douyin requires a valid MP4/M4V/MOV duration readable from ISO BMFF metadata; unknown duration fails closed with `DOUYIN_DURATION_UNVERIFIED`, while content above 900 seconds plus 0.1 seconds of container-rounding tolerance fails with `DOUYIN_DURATION_LIMIT`. In a mixed-platform run, the orchestrator records an invalid platform as `PLATFORM_REJECTED_ASSET` and continues every other platform that passed preflight.
+Validation checks the local video path, Unicode title limits, required platform fields, package-supplied Douyin topics, and requested cover paths and ratios. Douyin requires a valid MP4/M4V/MOV duration readable from ISO BMFF metadata; unknown duration fails closed with `DOUYIN_DURATION_UNVERIFIED`. No local duration ceiling is imposed; an explicit creator-page rejection is recorded as `PLATFORM_REJECTED_ASSET`.
 
 ## Production Orchestrator
 
@@ -77,7 +77,7 @@ UI concurrency is fixed at `1` and has no public override.
 
 State defaults to `~/.video-publisher/v2-jobs/<job-id>/`. The job stores the package fingerprint, numeric task-space ids, exact stable task-space names, task-space-bound receipts, observations, compact verdicts, an atomic one-generation `state.backup.json`, and schema-`2` receipt checkpoints under `checkpoints/`. An invalid primary state may recover only from a fingerprint-matching backup; the corrupt file is preserved as `state.corrupt-<timestamp>.json`, after which all platform gates are read again.
 
-Uploads run in parallel, but there is no cross-platform completion barrier. As soon as one platform proves its upload complete, it enters the exactly-one-wide rolling UI queue for mutation and fresh verification. A typed platform blocker freezes that platform and is returned in the partial summary while eligible siblings continue to `READY`. The command still exits `10` unless every selected platform is ready.
+上传并行执行，不设跨平台完成屏障。四个平台都先执行 `upload_start`；页面证明视频仍在上传且对应安全字段已就绪时，立即通过单宽 UI 队列执行 `prefill`，再继续等待上传完成。视频号只提前填写描述并保持短标题为空。封面、原创声明、B 站简介与创作声明、最终修复和验证不会提前。平台一旦完成上传，就进入滚动串行收尾；普通阻塞只冻结该平台。
 
 Before state or browser work, production acquires the account-wide publisher lock under `${VIDEO_PUBLISHER_V2_LOCK_ROOT:-$HOME/.video-publisher/v2-locks}/publisher/`, then `<job-dir>/orchestrator.lock/`. The first is independent of `--state-root`; the second protects persisted state. Direct diagnosis proves parent-lock ownership or acquires the same lock, and each spawned Ego controller registers a token-bound member PID. Normal completion removes locks; crash recovery removes the publisher lock only after its owner and all registered members are dead.
 
@@ -104,10 +104,12 @@ Use only for adapter diagnosis and targeted repair:
 node scripts/v2/run-platform.mjs \
   <platform> \
   /absolute/path/to/package.json \
-  <inspect|upload|mutate|verify|quarantine> \
+  <inspect|upload_start|prefill|upload|mutate|verify|quarantine> \
   [task-suffix] \
   [numeric-task-space-id]
 ```
+
+`upload_start` 和 `prefill` 支持四个平台。`upload_start` 不是上传完成回执；`prefill` 只处理已实测稳定字段且不上传封面或原创声明，运行后仍必须执行正式 `upload`、`mutate` 和 `verify`。
 
 Direct `mutate` diagnosis for Xiaohongshu, Bilibili, or WeChat Channels requires either onboarded `all_videos_original` or the one-run `--confirm-original-rights` override. `inspect`, `upload`, `verify`, and Bilibili `quarantine` remain available without either signal.
 

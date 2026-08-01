@@ -34,6 +34,61 @@ function mp4WithDuration(durationSeconds, timescale = 1000) {
   return Buffer.concat([box("ftyp", Buffer.alloc(4)), box("moov", box("mvhd", payload))]);
 }
 
+test("publisher prefills Douyin metadata before waiting for upload completion", async () => {
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-douyin-prefill-test-"));
+  const log=path.join(root,"events.ndjson");
+  const videoPath=path.join(root,"sample-video.mp4");
+  const packagePath=path.join(root,"package.json");
+  const configPath=path.join(root,"config.json");
+  await fs.promises.writeFile(videoPath,mp4WithDuration(30));
+  await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:2,onboarding:{completed:true},sourceDirectory:root,availablePlatforms:["douyin"],defaultPlatforms:["douyin"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:1,uploadConcurrency:1}}));
+  await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Early prefill",douyinDescription:"Fill while uploading.",douyinTopics:["Test"],cover:{uploadCustomCover:false}}));
+  const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"douyin-prefill","douyin","--state-root",root],{env:{
+    ...process.env,
+    VIDEO_PUBLISHER_CONFIG:configPath,
+    VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),
+    VIDEO_PUBLISHER_V2_MOCK_LOG:log,
+    VIDEO_PUBLISHER_V2_MOCK_DELAYS:JSON.stringify({"douyin:upload_start":10,"douyin:prefill":20,"douyin:upload":120}),
+  }});
+  assert.equal(result.code,0,`${result.stderr}\n${result.stdout}`);
+  const events=(await fs.promises.readFile(log,"utf8")).trim().split(/\n/).map(line=>JSON.parse(line));
+  assert.deepEqual(events.filter(item=>item.event==="start").map(item=>item.phase),["inspect","upload_start","prefill","upload","mutate","verify"]);
+  const prefillEnd=events.find(item=>item.phase==="prefill"&&item.event==="end").at;
+  const completionWaitStart=events.find(item=>item.phase==="upload"&&item.event==="start").at;
+  const finalMutationStart=events.find(item=>item.phase==="mutate"&&item.event==="start").at;
+  const completionWaitEnd=events.find(item=>item.phase==="upload"&&item.event==="end").at;
+  assert.ok(prefillEnd<=completionWaitStart,{prefillEnd,completionWaitStart});
+  assert.ok(finalMutationStart>=completionWaitEnd,{finalMutationStart,completionWaitEnd});
+  assert.equal(JSON.parse(result.stdout).ready,true);
+});
+
+test("publisher uses upload-time prefill for Xiaohongshu, Bilibili, and WeChat Channels", async () => {
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-early-prefill-platforms-test-"));
+  const log=path.join(root,"events.ndjson");
+  const videoPath=path.join(root,"sample-video.mp4");
+  const packagePath=path.join(root,"package.json");
+  const configPath=path.join(root,"config.json");
+  await fs.promises.writeFile(videoPath,mp4WithDuration(30));
+  await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:2,onboarding:{completed:true},sourceDirectory:root,availablePlatforms:["xiaohongshu","bilibili","wechat_channels"],defaultPlatforms:["xiaohongshu","bilibili","wechat_channels"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:3,uploadConcurrency:3}}));
+  await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Early metadata",xhsTopics:["Test"],bilibiliDescription:"Complete after upload.",bilibiliTags:["Test"],wechatDescription:"Early metadata\n\n#Test",wechatTags:["Test"],cover:{uploadCustomCover:false}}));
+  const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"early-prefill-platforms","xiaohongshu","bilibili","wechat_channels","--state-root",root],{env:{
+    ...process.env,
+    VIDEO_PUBLISHER_CONFIG:configPath,
+    VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),
+    VIDEO_PUBLISHER_V2_MOCK_LOG:log,
+    VIDEO_PUBLISHER_V2_MOCK_DELAYS:JSON.stringify({"xiaohongshu:upload":40,"bilibili:upload":40,"wechat_channels:upload":40}),
+  }});
+  assert.equal(result.code,0,`${result.stderr}\n${result.stdout}`);
+  const events=(await fs.promises.readFile(log,"utf8")).trim().split(/\n/).map(line=>JSON.parse(line));
+  for(const platform of ["xiaohongshu","bilibili","wechat_channels"]){
+    const phases=events.filter(item=>item.platform===platform&&item.event==="start").map(item=>item.phase);
+    assert.deepEqual(phases,["inspect","upload_start","prefill","upload","mutate","verify"]);
+    const prefillEnd=events.find(item=>item.platform===platform&&item.phase==="prefill"&&item.event==="end").at;
+    const uploadStart=events.find(item=>item.platform===platform&&item.phase==="upload"&&item.event==="start").at;
+    assert.ok(prefillEnd<=uploadStart,{platform,prefillEnd,uploadStart});
+  }
+});
+
 test("publisher advances a successful platform before a slow blocked upload exits", async () => {
   const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-test-"));
   const log=path.join(root,"events.ndjson");
@@ -136,11 +191,11 @@ test("publisher circuit-breaks all UI mutation after an upload loses Ego", async
   await fs.promises.writeFile(videoPath,mp4WithDuration(30));
   await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:1,onboarding:{completed:true},sourceDirectory:root,defaultPlatforms:["xiaohongshu","douyin"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:2,uploadConcurrency:2}}));
   await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Circuit breaker",xhsTopics:["Test"],douyinTopics:["Test"],cover:{uploadCustomCover:false}}));
-  const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"channel-break","xiaohongshu","douyin","--state-root",root],{env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),VIDEO_PUBLISHER_V2_MOCK_LOG:log,VIDEO_PUBLISHER_V2_MOCK_BROKEN_CHANNEL:"douyin:upload",VIDEO_PUBLISHER_V2_MOCK_DELAYS:JSON.stringify({"douyin:upload":5,"xiaohongshu:upload":60})}});
+  const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"channel-break","xiaohongshu","douyin","--state-root",root],{env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),VIDEO_PUBLISHER_V2_MOCK_LOG:log,VIDEO_PUBLISHER_V2_MOCK_BROKEN_CHANNEL:"douyin:upload",VIDEO_PUBLISHER_V2_MOCK_DELAYS:JSON.stringify({"douyin:upload_start":1,"douyin:prefill":1,"douyin:upload":1,"xiaohongshu:upload":150})}});
   assert.equal(result.code,0,`${result.stderr}\n${result.stdout}`);
   assert.match(result.stderr,/input channel broken; final verify parallel=2/);
   const events=(await fs.promises.readFile(log,"utf8")).trim().split(/\n/).map(line=>JSON.parse(line));
-  assert.equal(events.some(item=>item.phase==="mutate"),false,"no platform may mutate after a shared Ego channel failure");
+  assert.equal(events.some(item=>item.phase==="mutate"),false,"a sibling that is not yet eligible must not start mutation after a shared Ego channel failure");
   assert.equal(events.filter(item=>item.phase==="verify"&&item.event==="start").length,2,"read-only final verification still records page truth");
 });
 
@@ -153,11 +208,13 @@ test("publisher stops the serial UI queue when a mutator loses Ego", async () =>
   await fs.promises.writeFile(videoPath,mp4WithDuration(30));
   await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:1,onboarding:{completed:true},sourceDirectory:root,defaultPlatforms:["xiaohongshu","douyin","bilibili","wechat_channels"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:4,uploadConcurrency:4}}));
   await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Mutation break",xhsTopics:["Test"],douyinTopics:["Test"],bilibiliDescription:"Mutation circuit breaker",bilibiliTags:["Test"],wechatDescription:"Mutation circuit breaker\n\n#Test",wechatTags:["Test"],cover:{uploadCustomCover:false}}));
-  const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"mutation-break","xiaohongshu","douyin","bilibili","wechat_channels","--state-root",root],{env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),VIDEO_PUBLISHER_V2_MOCK_LOG:log,VIDEO_PUBLISHER_V2_MOCK_BROKEN_CHANNEL:"douyin:mutate",VIDEO_PUBLISHER_V2_MOCK_DELAYS:JSON.stringify({"xiaohongshu:upload":10,"douyin:upload":20,"bilibili:upload":80,"wechat_channels:upload":100})}});
+  const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"mutation-break","xiaohongshu","douyin","bilibili","wechat_channels","--state-root",root],{env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),VIDEO_PUBLISHER_V2_MOCK_LOG:log,VIDEO_PUBLISHER_V2_MOCK_BROKEN_CHANNEL:"douyin:mutate",VIDEO_PUBLISHER_V2_MOCK_DELAYS:JSON.stringify({"xiaohongshu:upload":1,"douyin:upload_start":1,"douyin:prefill":1,"douyin:upload":40,"bilibili:upload":200,"wechat_channels:upload":250})}});
   assert.equal(result.code,0,`${result.stderr}\n${result.stdout}`);
   const events=(await fs.promises.readFile(log,"utf8")).trim().split(/\n/).map(line=>JSON.parse(line));
   const mutationStarts=events.filter(item=>item.phase==="mutate"&&item.event==="start").map(item=>item.platform);
-  assert.deepEqual(mutationStarts,["xiaohongshu","douyin"],"platforms queued after the broken mutator must never start UI mutation");
+  assert.equal(mutationStarts.includes("douyin"),true,"the configured broken mutator must start");
+  assert.equal(mutationStarts.some(platform=>["bilibili","wechat_channels"].includes(platform)),false,"platforms queued after the broken mutator must never start UI mutation");
+  assert.equal(events.some(item=>item.platform==="xiaohongshu"&&item.phase==="prefill"),true,"safe upload-time prefill may finish before the later shared-channel failure");
   assert.equal(events.filter(item=>item.phase==="verify"&&item.event==="start").length,4,"final read-only verification still records every platform");
 });
 
@@ -252,7 +309,7 @@ test("publisher accepts onboarded all-videos-original policy without a one-run f
   assert.equal(JSON.parse(result.stdout).ready,true);
 });
 
-test("publisher blocks an over-15-minute Douyin video before browser work", async () => {
+test("publisher accepts verified long-form Douyin video before browser work", async () => {
   const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-duration-test-"));
   const videoPath=path.join(root,"too-long.mp4");
   const packagePath=path.join(root,"package.json");
@@ -262,12 +319,11 @@ test("publisher blocks an over-15-minute Douyin video before browser work", asyn
   await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:1,onboarding:{completed:true},sourceDirectory:root,defaultPlatforms:["douyin"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:1,uploadConcurrency:1}}));
   await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Duration test",douyinTopics:["Test"],cover:{uploadCustomCover:false}}));
   const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"duration-test","douyin","--state-root",root],{env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),VIDEO_PUBLISHER_V2_MOCK_LOG:log}});
-  assert.equal(result.code,1);
-  assert.match(result.stderr,/DOUYIN_DURATION_LIMIT/);
-  assert.equal(fs.existsSync(log),false,"browser runner must not start for over-limit media");
+  assert.equal(result.code,0,`${result.stderr}\n${result.stdout}`);
+  assert.equal(fs.existsSync(log),true,"browser runner should start for verified long-form media");
 });
 
-test("publisher isolates a Douyin duration blocker and still prepares eligible platforms", async () => {
+test("publisher prepares verified long-form media for Douyin and eligible sibling platforms", async () => {
   const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-partial-preflight-test-"));
   const videoPath=path.join(root,"too-long-for-douyin.mp4");
   const packagePath=path.join(root,"package.json");
@@ -277,14 +333,12 @@ test("publisher isolates a Douyin duration blocker and still prepares eligible p
   await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:1,onboarding:{completed:true},sourceDirectory:root,defaultPlatforms:["xiaohongshu","douyin"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:2,uploadConcurrency:2}}));
   await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Partial preflight",xhsTopics:["Test"],douyinTopics:["Test"],cover:{uploadCustomCover:false}}));
   const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"partial-preflight","xiaohongshu","douyin","--state-root",root],{env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),VIDEO_PUBLISHER_V2_MOCK_LOG:log}});
-  assert.equal(result.code,10,`${result.stderr}\n${result.stdout}`);
+  assert.equal(result.code,0,`${result.stderr}\n${result.stdout}`);
   const summary=JSON.parse(result.stdout);
   assert.equal(summary.platforms.xiaohongshu.ready,true);
-  assert.equal(summary.platforms.douyin.ready,false);
-  assert.equal(summary.platforms.douyin.blocker.code,"PLATFORM_REJECTED_ASSET");
-  assert.match(summary.platforms.douyin.blocker.message,/DOUYIN_DURATION_LIMIT/);
+  assert.equal(summary.platforms.douyin.ready,true);
   const events=(await fs.promises.readFile(log,"utf8")).trim().split(/\n/).map(line=>JSON.parse(line));
-  assert.deepEqual(new Set(events.map(item=>item.platform)),new Set(["xiaohongshu"]));
+  assert.deepEqual(new Set(events.map(item=>item.platform)),new Set(["xiaohongshu","douyin"]));
 });
 
 test("publisher invalidates receipts and checkpoints when Ego recreates a task space", async () => {

@@ -32,7 +32,7 @@ const platformFiles = {
 };
 
 function usage() {
-  return "Usage: run-platform.mjs <platform> <package.json> <inspect|upload|mutate|verify|quarantine> [task-suffix] [task-space-id] [--confirm-original-rights]";
+  return "Usage: run-platform.mjs <platform> <package.json> <inspect|upload_start|prefill|upload|mutate|verify|quarantine> [task-suffix] [task-space-id] [--confirm-original-rights]";
 }
 
 function runEgo(script, onSpawn) {
@@ -76,7 +76,7 @@ if (positional.some(arg => arg.startsWith("--"))) {
   process.exit(2);
 }
 const [platform, rawPackagePath, phase, taskSuffix = "manual", taskSpaceRef = ""] = positional;
-if (!PLATFORMS.includes(platform) || !rawPackagePath || !["inspect", "upload", "mutate", "verify", "quarantine"].includes(phase)) {
+if (!PLATFORMS.includes(platform) || !rawPackagePath || !["inspect", "upload_start", "prefill", "upload", "mutate", "verify", "quarantine"].includes(phase)) {
   console.error(usage());
   process.exit(2);
 }

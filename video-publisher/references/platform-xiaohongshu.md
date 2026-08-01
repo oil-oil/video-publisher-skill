@@ -15,7 +15,7 @@ no prose body unless explicitly requested
 
 Use the confirmed video file. Reuse an uploaded editor only when the filename or expected title identifies this package. A different active draft is a blocker; Xiaohongshu has no tested automatic quarantine flow.
 
-Do not mutate metadata until Xiaohongshu itself has fully completed the upload. Once that is proven, it may enter the single rolling post-upload queue immediately; another platform's slow or blocked upload is not a Xiaohongshu prerequisite.
+视频上传仍在进行时，只要 fresh inspection 同时证明标题输入框、正文话题编辑器和原生话题按钮可见，就可通过单宽 UI 队列提前填写标题和话题。原创声明、封面和最终验证仍必须等上传完成。`prefill` 不满足 video gate，之后必须继续正式 `upload` 等待。
 
 ## Topic Entities
 

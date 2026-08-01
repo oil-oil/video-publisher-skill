@@ -12,8 +12,6 @@ import {
 } from "../lib/content-package.mjs";
 import { defaultConfig, normalizeConfig } from "../lib/config.mjs";
 import {
-  DOUYIN_DURATION_CONTAINER_TOLERANCE_SECONDS,
-  DOUYIN_MAX_DURATION_SECONDS,
   inspectMediaFile,
   readIsoBmffDuration,
   validateMediaForPlatform,
@@ -102,8 +100,10 @@ test("an existing cover asset needs only its file path and ratio", async () => {
 test("Bilibili maps and validates the 4:3 homepage master", async () => {
   await withTempDir(async root => {
     const bilibiliCoverPath = path.join(root, "cover-4x3.png");
+    const companionPath = path.join(root, "cover-16x9.png");
     const packagePath = path.join(root, "package.json");
     await fs.promises.writeFile(bilibiliCoverPath, pngHeader(1440, 1080));
+    await fs.promises.writeFile(companionPath, pngHeader(1280, 720));
     await fs.promises.writeFile(packagePath, JSON.stringify({
       title: "Bilibili cover test",
       bilibiliDescription: "Description",
@@ -111,6 +111,7 @@ test("Bilibili maps and validates the 4:3 homepage master", async () => {
       cover: {
         uploadCustomCover: true,
         horizontal4x3Path: bilibiliCoverPath,
+        horizontal16x9Path: companionPath,
       },
     }));
     const pkg = readPackage(packagePath, { config: defaultConfig() });
@@ -125,13 +126,14 @@ test("Bilibili maps and validates the 4:3 homepage master", async () => {
       bilibiliTags: ["Test"],
       cover: {
         uploadCustomCover: true,
+        horizontal16x9Path: companionPath,
       },
     }));
-    const missingCoverPackage = readPackage(packagePath, { config: defaultConfig() });
-    assert.deepEqual(coverAssetsForPlatform(missingCoverPackage, "bilibili"), []);
+    const companionOnlyPackage = readPackage(packagePath, { config: defaultConfig() });
+    assert.deepEqual(coverAssetsForPlatform(companionOnlyPackage, "bilibili"), []);
     assert.match(
-      validateBilibiliPackage(missingCoverPackage).join("; "),
-      /no cover asset is mapped for bilibili/,
+      validateBilibiliPackage(companionOnlyPackage).join("; "),
+      /requires an exact 4:3 horizontal4x3Path/,
     );
   });
 });
@@ -225,15 +227,12 @@ test("ISO BMFF duration parser reads mvhd without ffprobe", async () => {
   });
 });
 
-test("Douyin preflight accepts 15:00 container rounding and rejects longer media only for Douyin", async () => {
+test("Douyin preflight accepts verified long-form media without a local duration ceiling", async () => {
   await withTempDir(async root => {
-    const acceptedPath = path.join(root, "accepted.mp4");
-    const rejectedPath = path.join(root, "rejected.mp4");
-    await fs.promises.writeFile(acceptedPath, mp4WithDuration(DOUYIN_MAX_DURATION_SECONDS + DOUYIN_DURATION_CONTAINER_TOLERANCE_SECONDS / 2));
-    await fs.promises.writeFile(rejectedPath, mp4WithDuration(DOUYIN_MAX_DURATION_SECONDS + DOUYIN_DURATION_CONTAINER_TOLERANCE_SECONDS + 0.001));
-    assert.deepEqual(validateMediaForPlatform({ videoPath: acceptedPath }, "douyin"), []);
-    assert.match(validateMediaForPlatform({ videoPath: rejectedPath }, "douyin")[0], /DOUYIN_DURATION_LIMIT/);
-    assert.deepEqual(validateMediaForPlatform({ videoPath: rejectedPath }, "xiaohongshu"), []);
+    const longPath = path.join(root, "long.mp4");
+    await fs.promises.writeFile(longPath, mp4WithDuration(1800));
+    assert.deepEqual(validateMediaForPlatform({ videoPath: longPath }, "douyin"), []);
+    assert.deepEqual(validateMediaForPlatform({ videoPath: longPath }, "xiaohongshu"), []);
   });
 });
 

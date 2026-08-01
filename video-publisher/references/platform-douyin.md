@@ -8,7 +8,7 @@ Use the 1-5 topic entities supplied by `douyinTopics`, in order. Do not inject a
 
 ## Draft And Editor Recovery
 
-Before opening Ego Lite, read MP4/M4V/MOV duration from its ISO BMFF `mvhd` metadata. Reject content longer than 900 seconds with `DOUYIN_DURATION_LIMIT`, allowing only 0.1 seconds for container-metadata rounding. This boundary is real-tested: a 15:09 HEVC source produced two explicit platform upload failures, a 14:59 stream copy from the same file uploaded successfully, and an exact 15:00 stream copy reported 900.010 seconds yet also uploaded successfully. All three kept the same codec, resolution, frame rate, bitrate, and approximately 1.11 GB size. Do not auto-trim or transcode; ask for a shorter export. Do not apply this Douyin-only limit to other platforms.
+Before opening Ego Lite, read MP4/M4V/MOV duration from its ISO BMFF `mvhd` metadata and fail closed when duration cannot be verified. Do not impose a local duration ceiling: account capabilities and creator-page limits can change. Attempt the exact verified source, treat an explicit creator-page rejection as `PLATFORM_REJECTED_ASSET`, and never auto-trim, transcode, or substitute media.
 
 If the upload page asks whether to continue the last unpublished video, discard that stale upload before starting the confirmed target. Use a real visible click; do not treat hidden dialog text as active.
 
@@ -19,6 +19,14 @@ For an empty or entity-free editor, clear through the maintained focused-editor 
 For the native title input, use real focus, the input element's verified full-range selection, real Backspace, and one CDP `Input.insertText` call. Do not type a Chinese title character by character, and do not append unless the field has been freshly proven empty. Retry the bounded clear-and-insert sequence only when the exact value does not persist.
 
 After a browser restart, refocus the rich description editor and verify `document.activeElement` immediately before every body insertion. One real crash reproduced a lost-focus write where `(expected title + expected description).slice(0, 30)` landed in the title field. Treat only that exact deterministic value as the known title/body input misroute and repair it with the normal verified title/body sequence. Any other unexpected title remains a foreign-draft blocker.
+
+## 上传期间提前填写
+
+抖音允许在视频仍显示“上传过程中”时编辑发布信息。生产流程先用 `upload_start` 注入或恢复视频；只有 fresh inspection 同时证明上传仍活跃、标题输入、描述编辑器、`#添加话题` 控件和同步发布设置均可用，才返回 `editable_uploading`。
+
+随后由全局单宽 UI 队列执行 `prefill`，复用正式 mutation 的幂等标题、描述、话题和同步设置修复。`prefill` 不上传封面、不把 video gate 标为成功，也不执行 final verification。完成后正式 `upload` 必须继续等待“上传成功”稳定出现，之后才允许封面、剩余 mutation 和 verify。
+
+如果视频已开始但编辑控件未完整出现，返回 typed blocker，不猜测选择器；如果视频在排队期间已经完成，跳过提前路径并进入普通完成后流程。
 
 ## Topic Entities
 

@@ -29,6 +29,14 @@ export function codePointLength(value) {
   return Array.from(String(value || "")).length;
 }
 
+export function xiaohongshuTitleLength(value) {
+  let halfUnits = 0;
+  for (const character of Array.from(String(value || ""))) {
+    halfUnits += character === " " || /[!-/:-@[-`{-~]/u.test(character) ? 1 : 2;
+  }
+  return halfUnits / 2;
+}
+
 export function getImageDimensions(filePath) {
   const buffer = fs.readFileSync(filePath);
   if (buffer.length >= 24
@@ -230,7 +238,7 @@ export function validateXiaohongshuPackage(pkg) {
   const errors = validateCommonPackage(pkg);
   errors.push(...validateCoverPackage(pkg, "xiaohongshu"));
   const xhsTitle = String(pkg.platformTitle?.xiaohongshu || pkg.xhsTitle || pkg.xiaohongshuTitle || pkg.title || "").trim();
-  const xhsTitleLength = codePointLength(xhsTitle);
+  const xhsTitleLength = xiaohongshuTitleLength(xhsTitle);
   if (xhsTitleLength > 20) errors.push(`xiaohongshu title is ${xhsTitleLength}/20`);
   if (!pkg.xhsTopics.length) errors.push("xhsTopics are required");
   const dottedTopics = pkg.xhsTopics.filter(topic => topic.includes("."));

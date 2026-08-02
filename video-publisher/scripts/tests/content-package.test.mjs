@@ -176,7 +176,7 @@ test("account defaults fill only fields omitted from the package", async () => {
   });
 });
 
-test("platform-specific titles are validated with Unicode code points", async () => {
+test("Bilibili titles and non-ASCII Xiaohongshu titles use Unicode code points", async () => {
   await withTempDir(async root => {
     const packagePath = path.join(root, "package.json");
     await fs.promises.writeFile(packagePath, JSON.stringify({
@@ -198,6 +198,29 @@ test("platform-specific titles are validated with Unicode code points", async ()
       bilibiliTags: ["Test"],
     }));
     assert.deepEqual(validateBilibiliPackage(readPackage(packagePath, { config: defaultConfig() })), []);
+  });
+});
+
+test("Xiaohongshu title counts half-width English punctuation and spaces as half characters", async () => {
+  await withTempDir(async root => {
+    const packagePath = path.join(root, "package.json");
+    await fs.promises.writeFile(packagePath, JSON.stringify({
+      title: `${"中".repeat(19)} !`,
+      xhsTopics: ["Test"],
+    }));
+    assert.deepEqual(
+      validateXiaohongshuPackage(readPackage(packagePath, { config: defaultConfig() })),
+      [],
+    );
+
+    await fs.promises.writeFile(packagePath, JSON.stringify({
+      title: `${"中".repeat(19)} !?`,
+      xhsTopics: ["Test"],
+    }));
+    assert.match(
+      validateXiaohongshuPackage(readPackage(packagePath, { config: defaultConfig() })).join("; "),
+      /xiaohongshu title is 20\.5\/20/,
+    );
   });
 });
 

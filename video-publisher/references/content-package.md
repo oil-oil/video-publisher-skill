@@ -68,7 +68,7 @@ Generic aliases are accepted for backward compatibility: `topics` or `tags` may 
 ## Platform Requirements
 
 ```text
-Xiaohongshu: title <= 20 Unicode code points; at least one xhsTopics item; xhsTopics must not contain `.`
+Xiaohongshu: weighted title length <= 20; each half-width English punctuation mark and ASCII space counts as 0.5, every other Unicode code point counts as 1; at least one xhsTopics item; xhsTopics must not contain `.`
 Douyin: title <= 30 Unicode code points; 1-5 douyinTopics; verifiable MP4/M4V/MOV duration
 Bilibili: title <= 80 Unicode code points; bilibiliDescription; 1-10 bilibiliTags
 WeChat Channels: wechatDescription and wechatTags; short title remains empty by default

@@ -153,6 +153,8 @@ Bilibili: title, concise description, tag chips, self-made declarations
 WeChat Channels: description begins with title and plain hashtags; leave short title empty
 ```
 
+Xiaohongshu titles have a 20-character limit. Count each half-width English punctuation mark and each ASCII space as 0.5 character; count every other Unicode code point as 1 character.
+
 Xiaohongshu topic entities do not support the half-width dot `.`. Reject dotted `xhsTopics` during package validation and require an explicitly chosen dot-free label such as `GPT56`; never silently rewrite the topic.
 
 This Skill does not create or edit cover artwork. When the user supplies existing cover files and explicitly enables `cover.uploadCustomCover: true`, read `references/cover-workflow.md`, then validate the mapped file paths and ratios before upload:

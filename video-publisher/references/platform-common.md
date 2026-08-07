@@ -15,7 +15,7 @@ One orchestrator owns all platform task spaces. Do not use sub Agents for live c
 
 Before reading or writing job state or starting a platform phase, acquire the account-wide publisher lock under the fixed lock root and then the job-directory `orchestrator.lock`. The publisher lock is independent of `--state-root`; direct platform diagnosis must join the same ownership token or acquire it itself. Register every spawned Ego controller as a token-bound member PID. Treat the lock as stale only when the owner and every registered member are dead. The job lock additionally protects persisted state, and a fresh lock whose owner file is still being written remains busy.
 
-Never click a final `发布`, `发布笔记`, `发表`, or `立即投稿` button. Final publishing is outside this Skill. Every adapter result must leave `finalPublishClicked: false`. The shared core installs a capture-phase click/submit guard; safety passes only when `guardArmed: true` and `blockedAttempts: 0` are observed from the live page.
+Never click a final `发布`, `发布笔记`, `发表`, `立即投稿`, `保存`, `安排时间`, `Save`, `Publish`, or `Schedule` button. Final publishing is outside this Skill. Every adapter result must leave `finalPublishClicked: false`. The shared core installs a capture-phase click/submit guard; safety passes only when `guardArmed: true` and `blockedAttempts: 0` are observed from the live page.
 
 If Ego reports that the user controls a task space, stop the whole browser job. Do not retry, create a replacement task space, or claim it without explicit user confirmation.
 
@@ -34,7 +34,7 @@ Use `scripts/run-safe-platforms.sh`, which invokes `scripts/v2/publisher.mjs`.
 8. freeze typed-blocked platforms and continue every eligible sibling without a global upload barrier
 ```
 
-`upload_start` 只在上传仍活跃且对应平台的已验证控件可见时返回 `editable_uploading`。`prefill` 的范围为：抖音标题、描述、话题和同步设置；小红书标题和话题；B 站标题和标签；视频号描述和空短标题。它不碰封面、原创声明，也不满足 video gate。正式 `upload` 随后继续等待完成。所有预填、最终修复和对应验证仍通过单宽 UI 队列执行。
+`upload_start` 只在上传仍活跃且对应平台的已验证控件可见时返回 `editable_uploading`。`prefill` 的范围为：抖音标题、描述、话题和同步设置；小红书标题和话题；B 站标题和标签；视频号描述和空短标题；YouTube 标题、无链接说明、可选标签、受众和上传中可编辑的高级设置。它不碰封面、原创声明、YouTube 可见性或最终步骤，也不满足 video gate。正式 `upload` 随后继续等待上传、处理和平台检查完成。所有预填、最终修复和对应验证仍通过单宽 UI 队列执行。
 
 Ordinary typed blockers are platform-local: stop scheduling that platform after its blocker, retain its evidence, and continue successful siblings. `AUTH_REQUIRED` therefore freezes only the unauthenticated platform. `USER_CONTROL` remains global because task-space ownership requires all browser work to stop.
 
@@ -42,9 +42,9 @@ The browser channel is shared across task spaces. If any runner reports `INPUT_C
 
 Before step 1, validate the exact local media for every selected platform. Douyin requires a valid MP4/M4V/MOV duration readable from ISO BMFF metadata and fails closed when it cannot be verified. Do not impose a local duration ceiling; an explicit creator-page rejection becomes `PLATFORM_REJECTED_ASSET`. Other valid platforms continue through the same run. If none is eligible, fail before job creation. Never silently trim, transcode, or substitute another source.
 
-The maintained adapter runner also takes an atomic per-platform filesystem lock. A second process targeting the same platform fails before opening Ego instead of overlapping with an active upload, mutation, inspection, or verification. Stale locks from dead processes are removed automatically. This still permits the intended four-platform parallel upload/check phases.
+The maintained adapter runner also takes an atomic per-platform filesystem lock. A second process targeting the same platform fails before opening Ego instead of overlapping with an active upload, mutation, inspection, or verification. Stale locks from dead processes are removed automatically. This still permits the intended selected-platform parallel upload/check phases.
 
-The three lock levels solve different races: the account-wide publisher lock serializes video jobs across state roots, the job lock protects one persisted job, and platform locks prevent accidental same-platform overlap as defense in depth. Four-platform upload/check parallelism remains available inside the owning job.
+The three lock levels solve different races: the account-wide publisher lock serializes video jobs across state roots, the job lock protects one persisted job, and platform locks prevent accidental same-platform overlap as defense in depth. Selected-platform upload/check parallelism remains available inside the owning job.
 
 Persist the exact task-space name alongside its numeric id. After an Ego crash, ids may be recycled for a different job; a live name mismatch is identity loss, never permission to enter that space. Select or recreate only the stored exact name, invalidate old-space receipts, and verify fresh page truth.
 
@@ -53,8 +53,8 @@ Persist the exact task-space name alongside its numeric id. After an Ego crash, 
 ```text
 inspect: read-only page observation
 quarantine: Bilibili-only draft resolution
-upload_start: 四个平台的上传启动或恢复，直到可编辑上传中或完成证据出现
-prefill: 四个平台的上传中安全字段修复
+upload_start: 五个平台的上传启动或恢复，直到可编辑上传中或完成证据出现
+prefill: 五个平台的上传中安全字段修复
 upload: target video upload and full completion wait
 mutate: idempotent UI repair
 verify: fresh independent observation using stored receipts
@@ -182,6 +182,7 @@ Xiaohongshu: selected topic entities; no prose body by default.
 Douyin: exact package-supplied topics as real entities, with no residue or duplicates.
 Bilibili: exact requested tag chips; allow only relevant platform auto-tags declared by the adapter.
 WeChat Channels: plain hashtags inside the description; short title empty by default.
+YouTube: exact title and link-free full description, exact optional tag-chip set including empty, explicit audience, and verified advanced settings.
 ```
 
 Never fake topic/entity HTML. Use the visible editor, real suggestion row, and a fresh entity check.
@@ -190,8 +191,6 @@ Never fake topic/entity HTML. Use the visible editor, real suggestion row, and a
 
 Static tests must prove package/media validation, central gate evaluation, rolling scheduler advancement, platform-blocker isolation, global circuit breaking, lock contention, permissions, state/receipt recovery, and structured failure handling. Only a real creator-page run can accept selectors, topic entities, declaration dialogs, account settings, draft quarantine, upload lifecycle, and cover flows.
 
-As of 2026-07-16, full production runs verified four parallel uploads behind the previous cross-platform barrier, serial UI mutation, parallel final verification, exact stable task-space identity, task-space recreation, atomic backup/checkpoint recovery, interruption during upload and mutation, lock contention and stale-owner cleanup under the then-current layout, invocation-wide input-channel circuit breaking, and repeated no-op `READY` reruns. Every accepted run kept the final-publish guard armed with zero attempts.
-
-The 2026-07-17 rolling finalization scheduler has local integration coverage for early successful-platform mutation, typed upload-blocker isolation, authentication isolation, and retained input-channel circuit breaking. It has not yet passed the required real full selected-platform regression. The rolling scheduler, current account-wide lock path, direct-runner ownership token, fail-closed unknown Douyin duration, and WeChat empty-description receipt rule must remain marked pending until the next applicable real creator-page and full-orchestrator acceptance run.
-
 For a page-adapter change, verify the exact live postcondition and a no-op rerun. For scheduler, persistence, locking, shared input, task-space recovery, or receipt changes, repeat the relevant crash/restart case and the full selected-platform production regression. Never treat a one-platform diagnostic or unit test as system-level acceptance.
+
+历史证据、当前已接受范围和待回归项统一记录在 `acceptance-history.md`；只有验收或发布维护时读取。

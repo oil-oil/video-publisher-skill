@@ -4,13 +4,9 @@ Read `platform-common.md` and `ego-browser-workflow.md` first.
 
 ## Contents
 
-- Acceptance boundary and Wujie lifecycle
+- Wujie lifecycle
 - Upload completion and draft identity
 - Text, original declaration, custom covers, and required gates
-
-## 当前验收边界
-
-截至 2026-08-01，平台专用流程已通过上传完成、精确描述、空短标题、原创声明、个人主页 3:4 与分享卡片 4:3 自定义封面、旧封面编辑器恢复、任务空间替换、无阻塞弹窗、`发表` 按钮可用和 `finalPublishClicked: false` 验证。126 MB 真实视频还证明：平台显示 `生成中` 时，描述和短标题控件已经可编辑。
 
 ## Wujie Lifecycle
 
@@ -57,10 +53,6 @@ Require cover cards and the absence of all progress signals, including percentag
 3. 不操作原创声明、封面、活动、定时发表和最终 `发表`。
 
 由于视频号页面不提供可靠文件名，上传启动回执必须同时绑定包指纹和任务空间 id。只有描述已经精确匹配，或存在匹配的上传启动回执时，才允许预填。快速视频可能在预填进程启动前完成平台处理；此时仍可安全预填，但不得宣称写入发生在上传中。
-
-A 533 MB fault test terminated the orchestrator during the Wujie upload. The same task space resumed with action mode `resume_existing`, reactivated the page lifecycle while waiting, completed without reinjection, and later reached `READY` with both cover slots verified.
-
-A later 534 MB run deleted the ready WeChat Channels task space. The same job created a replacement numeric space, re-uploaded and rebuilt only WeChat Channels, generated fresh vertical and horizontal cover receipts, preserved the other three ready drafts, and passed repeated no-op verification.
 
 ## Draft Identity
 
@@ -116,3 +108,5 @@ no blocking dialog
 visible enabled 发表 button
 final publish not clicked
 ```
+
+实测记录和待回归边界见 `acceptance-history.md`。

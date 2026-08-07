@@ -4,7 +4,7 @@ import path from "node:path";
 
 export const CONFIG_SCHEMA_VERSION = 2;
 const LEGACY_CONFIG_SCHEMA_VERSION = 1;
-export const CONFIG_PLATFORMS = ["xiaohongshu", "douyin", "bilibili", "wechat_channels"];
+export const CONFIG_PLATFORMS = ["xiaohongshu", "douyin", "bilibili", "wechat_channels", "youtube"];
 export const ORIGINALITY_POLICIES = ["ask_each_run", "all_videos_original"];
 
 function cleanList(values = []) {
@@ -49,6 +49,11 @@ export function defaultConfig() {
     platforms: {
       douyin: { defaultTopics: [] },
       bilibili: { allowedAutoTags: [] },
+      youtube: {
+        defaultCategory: "",
+        defaultLanguage: "",
+        defaultVisibility: "private",
+      },
     },
     execution: {
       checkConcurrency: 4,
@@ -100,6 +105,11 @@ export function normalizeConfig(raw = {}) {
       bilibili: {
         allowedAutoTags: cleanList(raw.platforms?.bilibili?.allowedAutoTags || []),
       },
+      youtube: {
+        defaultCategory: String(raw.platforms?.youtube?.defaultCategory || "").trim(),
+        defaultLanguage: String(raw.platforms?.youtube?.defaultLanguage || "").trim(),
+        defaultVisibility: String(raw.platforms?.youtube?.defaultVisibility || fallback.platforms.youtube.defaultVisibility).trim(),
+      },
     },
     execution: {
       checkConcurrency: Number(raw.execution?.checkConcurrency ?? fallback.execution.checkConcurrency),
@@ -130,6 +140,9 @@ export function validateConfig(config) {
   }
   if (config.platforms.douyin.defaultTopics.length > 5) {
     errors.push("platforms.douyin.defaultTopics supports at most 5 topics");
+  }
+  if (!["private", "unlisted", "public"].includes(config.platforms.youtube.defaultVisibility)) {
+    errors.push("platforms.youtube.defaultVisibility must be one of: private, unlisted, public");
   }
   if (!ORIGINALITY_POLICIES.includes(config.declarations.originalityPolicy)) {
     errors.push(`declarations.originalityPolicy must be one of: ${ORIGINALITY_POLICIES.join(", ")}`);

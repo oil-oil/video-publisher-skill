@@ -8,6 +8,7 @@ import {
   validateDouyinPackage,
   validateWechatChannelsPackage,
   validateXiaohongshuPackage,
+  validateYoutubePackage,
 } from "./lib/content-package.mjs";
 import { inspectMediaFile, validateMediaForPlatform } from "./lib/media.mjs";
 
@@ -16,12 +17,13 @@ const validators = {
   douyin: validateDouyinPackage,
   bilibili: validateBilibiliPackage,
   wechat_channels: validateWechatChannelsPackage,
+  youtube: validateYoutubePackage,
 };
 
 const [platform, packagePath] = process.argv.slice(2);
 
 if (!validators[platform] || !packagePath) {
-  console.error("Usage: check-package.mjs <xiaohongshu|douyin|bilibili|wechat_channels> <package.json>");
+  console.error("Usage: check-package.mjs <xiaohongshu|douyin|bilibili|wechat_channels|youtube> <package.json>");
   process.exit(2);
 }
 

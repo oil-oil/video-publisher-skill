@@ -82,4 +82,4 @@ visible enabled 发布 button
 final publish not clicked
 ```
 
-This contract passed real draft, interrupted-upload, task-space replacement, partial-topic recovery, whitespace-topic, title-focus, custom-cover checkpoint, default-cover, and exact 15-minute boundary runs through 2026-07-16. The detailed cases are encoded in focused tests and the root acceptance boundary; retain only behavior that affects current inspection, mutation, or verification.
+实测记录和待回归边界见 `acceptance-history.md`。

@@ -28,10 +28,6 @@ targetUploaded: the requested filename/title owns that completed video
 
 Do not equate “target not found” with “no active upload”. This false equivalence previously skipped foreign-draft quarantine.
 
-Both same-target resume and a real foreign-draft save/clean-page flow passed live testing. A later task-space-loss test recreated the Bilibili space, resumed the same target with no video upload, and repaired only the page state that did not survive the restore.
-
-A separate 533 MB fault test terminated the orchestrator while Bilibili was actively uploading. The same task space resumed with upload action mode `resume_existing`, completed without another file injection, and independently reached `READY`.
-
 ## Upload Entry Recovery
 
 The current task-space tab may remain on another authenticated `member.bilibili.com` page that has no upload input. Treat this as a bounded page-readiness state, not immediate selector drift:
@@ -109,4 +105,4 @@ visible enabled 立即投稿 button
 final publish not clicked
 ```
 
-The complete draft path passed real testing on 2026-07-14, including foreign-draft quarantine, the scoped cover-completion fallback, checkpoint recovery, and repeated no-op verification. On 2026-07-31, the current Bilibili production frontend was inspected directly: it labels the primary editor as homepage 4:3, recommends at least 1200 × 900, labels the companion editor as personal-space 16:9, and prompts to synchronize 4:3 changes to 16:9. The corrected 4:3 package mapping is locally tested; a fresh automated 4:3 upload still requires creator-page acceptance.
+实测记录和待回归边界见 `acceptance-history.md`。

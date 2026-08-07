@@ -141,6 +141,7 @@ test("Bilibili cover repair continues after a rejected tag and preserves the blo
 test("Bilibili uses the 4:3 homepage master and receipt ratio", () => {
   const source = fs.readFileSync(path.join(PLATFORM_DIR, "bilibili.mjs"), "utf8");
   assert.match(source, /pkg\.cover\?\.horizontal4x3Path/);
+  assert.match(source, /添加主封面\|添加封面/, "cover entry repair must support the current 添加封面 label");
   assert.match(source, /receipt\.ratio==='4:3'/);
   assert.match(source, /ratio:'4:3'/);
   assert.match(source, /slots:\['homepage-4:3','space-16:9'\]/);
@@ -153,4 +154,32 @@ test("WeChat Channels refuses an unproven uploaded draft with an empty descripti
   assert.match(source, /expectedVideoReceipt\?\.fingerprint===jobFingerprint/);
   assert.match(source, /current\.gates\.draftIdentity=okGate\(\{trustedUploadAction:true,mode,uploadStartReceipt:/);
   assert.match(source, /if\(!before\.gates\.draftIdentity\.ok\)return/);
+});
+
+test("YouTube prefill repairs full details but defers thumbnail, visibility, and final save", () => {
+  const source = fs.readFileSync(path.join(PLATFORM_DIR, "youtube.mjs"), "utf8");
+  const start = source.indexOf("async function prefillYoutube");
+  const end = source.indexOf("async function mutateYoutube", start);
+  assert.ok(start >= 0 && end > start, "YouTube prefill function must remain discoverable");
+  const prefill = source.slice(start, end);
+  assert.match(source, /stage: 'editable_uploading'/);
+  assert.match(source, /controls: \{ title: visible\(titleEditor\), description: visible\(descriptionEditor\) \}/);
+  assert.match(prefill, /ensureYoutubeMetadata\(before\)/);
+  assert.doesNotMatch(prefill, /uploadYoutubeThumbnail|advanceYoutubeToVisibility|ensureYoutubeVisibility/);
+  assert.doesNotMatch(source, /click\([^)]*done-button|click\([^)]*final/i, "the adapter must never click YouTube's final action");
+});
+
+test("YouTube final guard covers localized Save, Publish, and Schedule labels only on YouTube", () => {
+  const source = fs.readFileSync(path.join(DIR, "..", "ego", "core.mjs"), "utf8");
+  assert.match(source, /YOUTUBE_FINAL_TEXT = \/\^\(保存\|发布\|安排时间\|Save\|Publish\|Schedule\)\$\//);
+  assert.match(source, /platform === 'youtube' \? YOUTUBE_FINAL_TEXT : FINAL_TEXT/);
+});
+
+test("YouTube corrections can clear all tags and replace a stale details receipt", () => {
+  const source = fs.readFileSync(path.join(PLATFORM_DIR, "youtube.mjs"), "utf8");
+  assert.match(source, /for \(const tag of youtubeTags\)/, "an empty requested list must skip additions after removing old chips");
+  assert.match(source, /const detailsGatesReady = \['title', 'description', 'tags', 'audience', 'settings'\]/);
+  assert.match(source, /if \(!detailsGatesReady && before\.evidence\?\.workflowStep/);
+  assert.match(source, /currentDetailsComparable/);
+  assert.match(source, /expectedReceipts\.details = receipts\.details/);
 });

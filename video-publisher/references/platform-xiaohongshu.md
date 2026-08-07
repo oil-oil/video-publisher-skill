@@ -67,4 +67,4 @@ one visible enabled final control labeled `发布` or `发布笔记`
 final publish not clicked
 ```
 
-This path passed real draft runs on 2026-07-14 and 2026-07-15. The visible-tab polling path was fault-tested by discarding the receipt and re-uploading the same 3:4 asset. Later 731 MB and 533 MB runs survived orchestrator termination during upload without reinjection, and the 533 MB run verified whitespace-normalized topic lookup plus three no-op full reruns. Real Ego Lite crash/restart and sustained-load runs reproduced both the cold-page topic-decoration failure and an empty candidate panel. A mutation-stage crash finally proved the persistent failure was hidden lifecycle throttling: activating and focusing that exact failed page made its next bounded whole-set rebuild commit four entities on attempt one. The 3:4 receipt and four-platform `READY` state were restored, followed by three full no-op reruns.
+实测记录和待回归边界见 `acceptance-history.md`。

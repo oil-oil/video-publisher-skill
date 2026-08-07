@@ -4,14 +4,17 @@ const PLATFORM_URLS = {
   douyin: 'https://creator.douyin.com/creator-micro/content/upload',
   bilibili: 'https://member.bilibili.com/platform/upload/video/frame?spm_id_from=333.1007.top_bar.upload',
   wechat_channels: 'https://channels.weixin.qq.com/platform/post/create',
+  youtube: 'https://studio.youtube.com/',
 };
 const PLATFORM_HOSTS = {
   xiaohongshu: /creator\.xiaohongshu\.com/,
   douyin: /creator\.douyin\.com/,
   bilibili: /member\.bilibili\.com/,
   wechat_channels: /channels\.weixin\.qq\.com/,
+  youtube: /studio\.youtube\.com|accounts\.google\.com/,
 };
 const FINAL_TEXT = /^(发布|发布笔记|发表|立即投稿)$/;
+const YOUTUBE_FINAL_TEXT = /^(保存|发布|安排时间|Save|Publish|Schedule)$/i;
 const FINAL_GUARD_KEY = '__VIDEO_PUBLISHER_FINAL_GUARD__';
 let activeTaskSpace = null;
 let taskSpaceRecovery = null;
@@ -87,6 +90,7 @@ async function selectPlatformTab() {
 }
 
 async function armFinalPublishGuard() {
+  const activeFinalText = platform === 'youtube' ? YOUTUBE_FINAL_TEXT : FINAL_TEXT;
   return await js(String.raw`((key, finalSource, finalFlags) => {
     const existing = window[key]
     if (existing?.armed === true && existing.version === 1) {
@@ -113,7 +117,7 @@ async function armFinalPublishGuard() {
     document.addEventListener('submit', guard, true)
     window[key] = state
     return { ok: true, armed: true, version: state.version, armedAt: state.armedAt, blockedAttempts: 0 }
-  })(${JSON.stringify(FINAL_GUARD_KEY)}, ${JSON.stringify(FINAL_TEXT.source)}, ${JSON.stringify(FINAL_TEXT.flags)})`);
+  })(${JSON.stringify(FINAL_GUARD_KEY)}, ${JSON.stringify(activeFinalText.source)}, ${JSON.stringify(activeFinalText.flags)})`);
 }
 
 async function inspectFinalPublishGuard() {

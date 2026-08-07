@@ -83,3 +83,18 @@ test("READY rejects any attempted final-publish interaction even when it was blo
   assert.equal(verdict.ready, false);
   assert.deepEqual(verdict.missing, ["safety"]);
 });
+
+test("YouTube READY requires audience, full settings, visibility, and final-save safety", () => {
+  const valid = observation("youtube");
+  assert.equal(evaluateObservation(valid).ready, true);
+  valid.gates.visibility = { ok: false, evidence: { expected: "private", actual: "" } };
+  const verdict = evaluateObservation(valid);
+  assert.equal(verdict.ready, false);
+  assert.deepEqual(verdict.missing, ["visibility"]);
+  assert.equal(classifyVerdict(verdict), "needs_mutation");
+  assert.deepEqual(requiredGates("youtube"), [
+    "authenticated", "draftIdentity", "video", "title", "description", "tags",
+    "audience", "settings", "cover", "visibility", "noBlockingDialog",
+    "finalButton", "safety",
+  ]);
+});

@@ -9,6 +9,7 @@ import {
   validateBilibiliPackage,
   validateDouyinPackage,
   validateXiaohongshuPackage,
+  validateYoutubePackage,
 } from "../lib/content-package.mjs";
 import { defaultConfig, normalizeConfig } from "../lib/config.mjs";
 import {
@@ -268,5 +269,63 @@ test("Douyin preflight fails closed when duration cannot be verified", async () 
     assert.match(validateMediaForPlatform({ videoPath: unreadableMp4 }, "douyin")[0], /DOUYIN_DURATION_UNVERIFIED/);
     assert.match(validateMediaForPlatform({ videoPath: unsupportedContainer }, "douyin")[0], /DOUYIN_DURATION_UNVERIFIED/);
     assert.deepEqual(validateMediaForPlatform({ videoPath: unsupportedContainer }, "bilibili"), []);
+  });
+});
+
+test("YouTube package validates full metadata and an exact 16:9 custom thumbnail", async () => {
+  await withTempDir(async root => {
+    const thumbnailPath = path.join(root, "thumbnail-16x9.png");
+    const packagePath = path.join(root, "package.json");
+    await fs.promises.writeFile(thumbnailPath, pngHeader(1920, 1080));
+    await fs.promises.writeFile(packagePath, JSON.stringify({
+      title: "YouTube upload test",
+      youtubeDescription: "A complete YouTube description.",
+      youtubeTags: [],
+      youtubeAudience: "not_made_for_kids",
+      youtubeVisibility: "public",
+      youtubeCategory: "科学与技术",
+      youtubeLanguage: "中文（简体）",
+      youtubeAlteredContent: false,
+      cover: {
+        uploadCustomCover: true,
+        horizontal16x9Path: thumbnailPath,
+      },
+    }));
+    const pkg = readPackage(packagePath, { config: defaultConfig() });
+    assert.deepEqual(validateYoutubePackage(pkg), []);
+    assert.deepEqual(coverAssetsForPlatform(pkg, "youtube"), [
+      { slot: "thumbnail", ratio: "16:9", path: thumbnailPath },
+    ]);
+    assert.equal(pkg.youtubeVisibility, "public");
+    assert.equal(pkg.youtubeAudience, "not_made_for_kids");
+    assert.deepEqual(pkg.youtubeTags, []);
+  });
+});
+
+test("YouTube package fails closed on audience, visibility, limits, and thumbnail ratio", async () => {
+  await withTempDir(async root => {
+    const wrongThumbnailPath = path.join(root, "thumbnail-4x3.png");
+    const packagePath = path.join(root, "package.json");
+    await fs.promises.writeFile(wrongThumbnailPath, pngHeader(1440, 1080));
+    await fs.promises.writeFile(packagePath, JSON.stringify({
+      title: "T".repeat(101),
+      youtubeDescription: "Read more at https://example.com/video",
+      youtubeTags: [],
+      youtubeAudience: "",
+      youtubeVisibility: "scheduled",
+      cover: {
+        uploadCustomCover: true,
+        horizontal16x9Path: wrongThumbnailPath,
+      },
+    }));
+    const invalid = readPackage(packagePath, { config: defaultConfig() });
+    const errors = validateYoutubePackage(invalid).join("; ");
+    assert.match(errors, /youtube title is 101\/100/);
+    assert.match(errors, /youtubeDescription must not contain web links/);
+    assert.match(errors, /youtubeAudience must be one of/);
+    assert.match(errors, /youtubeVisibility must be one of/);
+    assert.match(errors, /expected 16:9, got 1440x1080/);
+    invalid.youtubeDescription = "";
+    assert.match(validateYoutubePackage(invalid).join("; "), /youtubeDescription is required/);
   });
 });

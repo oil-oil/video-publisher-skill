@@ -9,6 +9,7 @@ import {
   validateDouyinPackage,
   validateWechatChannelsPackage,
   validateXiaohongshuPackage,
+  validateYoutubePackage,
 } from "../lib/content-package.mjs";
 import { loadConfig } from "../lib/config.mjs";
 import { inspectMediaFile, validateMediaForPlatform } from "../lib/media.mjs";
@@ -23,12 +24,14 @@ const validators = {
   douyin: validateDouyinPackage,
   bilibili: validateBilibiliPackage,
   wechat_channels: validateWechatChannelsPackage,
+  youtube: validateYoutubePackage,
 };
 const platformFiles = {
   xiaohongshu: "xiaohongshu.mjs",
   douyin: "douyin.mjs",
   bilibili: "bilibili.mjs",
   wechat_channels: "wechat-channels.mjs",
+  youtube: "youtube.mjs",
 };
 
 function usage() {

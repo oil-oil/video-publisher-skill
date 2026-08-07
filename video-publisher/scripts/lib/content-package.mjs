@@ -102,6 +102,9 @@ export function coverAssetsForPlatform(pkg, platform) {
       ...(verticalPath ? [{ slot: "portrait", ratio: "3:4", path: verticalPath }] : []),
       ...(horizontalPath ? [{ slot: "landscape", ratio: "4:3", path: horizontalPath }] : []),
     ],
+    youtube: cover.horizontal16x9Path
+      ? [{ slot: "thumbnail", ratio: "16:9", path: String(cover.horizontal16x9Path).trim() }]
+      : [],
   };
   return mapping[platform] || [];
 }
@@ -118,11 +121,13 @@ export function readPackage(packagePath, { config: suppliedConfig } = {}) {
     douyin: String(parsed.douyinTitle || title).trim(),
     bilibili: String(parsed.bilibiliTitle || title).trim(),
     wechat_channels: String(parsed.wechatTitle || parsed.wechatChannelsTitle || title).trim(),
+    youtube: String(parsed.youtubeTitle || title).trim(),
   };
   const description = normalizeDescription(parsed.description || "");
   const douyinDescription = normalizeDescription(parsed.douyinDescription || parsed.description || "");
   const bilibiliDescription = normalizeDescription(parsed.bilibiliDescription || parsed.description || "");
   const wechatDescription = normalizeDescription(parsed.wechatDescription || parsed.description || "");
+  const youtubeDescription = normalizeDescription(parsed.youtubeDescription || parsed.description || "");
   const cover = {
     uploadCustomCover: parsed.cover?.uploadCustomCover === true,
     vertical3x4Path: String(parsed.cover?.vertical3x4Path || "").trim(),
@@ -145,6 +150,17 @@ export function readPackage(packagePath, { config: suppliedConfig } = {}) {
   );
   const xhsTopics = uniqueCleanTags(parsed.xhsTopics || parsed.topics || parsed.tags || []);
   const wechatTags = uniqueCleanTags(parsed.wechatTags || parsed.topics || parsed.tags || []);
+  const youtubeTags = uniqueCleanTags(parsed.youtubeTags || parsed.tags || parsed.topics || []);
+  const youtubeAudience = String(parsed.youtubeAudience || "").trim();
+  const youtubeVisibility = String(
+    parsed.youtubeVisibility || config.platforms.youtube.defaultVisibility || "private",
+  ).trim();
+  const youtubeCategory = String(
+    parsed.youtubeCategory ?? config.platforms.youtube.defaultCategory ?? "",
+  ).trim();
+  const youtubeLanguage = String(
+    parsed.youtubeLanguage ?? config.platforms.youtube.defaultLanguage ?? "",
+  ).trim();
   return {
     ...parsed,
     title,
@@ -153,12 +169,24 @@ export function readPackage(packagePath, { config: suppliedConfig } = {}) {
     douyinDescription,
     bilibiliDescription,
     wechatDescription,
+    youtubeDescription,
     cover,
     douyinTopics,
     bilibiliTags,
     bilibiliAllowedAutoTags,
     xhsTopics,
-    wechatTags
+    wechatTags,
+    youtubeTags,
+    youtubeAudience,
+    youtubeVisibility,
+    youtubeCategory,
+    youtubeLanguage,
+    youtubePlaylist: String(parsed.youtubePlaylist || "").trim(),
+    youtubeLicense: String(parsed.youtubeLicense || "standard_youtube").trim(),
+    youtubePaidPromotion: parsed.youtubePaidPromotion === true,
+    youtubeAlteredContent: parsed.youtubeAlteredContent === true,
+    youtubeAllowEmbedding: parsed.youtubeAllowEmbedding !== false,
+    youtubeNotifySubscribers: parsed.youtubeNotifySubscribers !== false,
   };
 }
 
@@ -166,7 +194,7 @@ export function validateCommonPackage(pkg) {
   const errors = [];
   if (!pkg.title) errors.push("title is required");
   if (hasLiteralEscapedNewline(pkg.title)) errors.push("title contains literal escaped newline");
-  for (const key of ["description", "douyinDescription", "bilibiliDescription", "wechatDescription"]) {
+  for (const key of ["description", "douyinDescription", "bilibiliDescription", "wechatDescription", "youtubeDescription"]) {
     if (hasLiteralEscapedNewline(pkg[key])) errors.push(`${key} contains literal escaped newline; use real newlines`);
   }
   return errors;
@@ -194,6 +222,9 @@ export function validateCoverPackage(pkg, platform) {
   }
   if (platform === "wechat_channels" && assets.length !== 2) {
     errors.push("wechat_channels custom cover upload requires both 3:4 personal-profile and 4:3 share-card covers");
+  }
+  if (platform === "youtube" && assets.length !== 1) {
+    errors.push("youtube custom thumbnail upload requires one exact 16:9 horizontal16x9Path");
   }
   for (const asset of assets) {
     if (!asset.path || !fs.existsSync(asset.path)) {
@@ -253,6 +284,32 @@ export function validateWechatChannelsPackage(pkg) {
   errors.push(...validateCoverPackage(pkg, "wechat_channels"));
   if (!pkg.wechatDescription) errors.push("wechatDescription is required");
   if (!pkg.wechatTags.length) errors.push("wechatTags are required");
+  return errors;
+}
+
+export function validateYoutubePackage(pkg) {
+  const errors = validateCommonPackage(pkg);
+  errors.push(...validateCoverPackage(pkg, "youtube"));
+  const title = String(pkg.platformTitle?.youtube || pkg.title || "");
+  if (codePointLength(title) > 100) errors.push(`youtube title is ${codePointLength(title)}/100`);
+  if (!pkg.youtubeDescription) errors.push("youtubeDescription is required");
+  if (codePointLength(pkg.youtubeDescription) > 5000) {
+    errors.push(`youtube description is ${codePointLength(pkg.youtubeDescription)}/5000`);
+  }
+  if (/(?:https?:\/\/|www\.|(?:^|[\s(])(?:[a-z0-9-]+\.)+(?:com|cn|net|org|io|ai|dev|app|co)(?:[\/\s)]|$))/iu.test(pkg.youtubeDescription)) {
+    errors.push("youtubeDescription must not contain web links");
+  }
+  const serializedTagsLength = pkg.youtubeTags.join(",").length;
+  if (serializedTagsLength > 500) errors.push(`youtube tags are ${serializedTagsLength}/500 characters`);
+  if (!["made_for_kids", "not_made_for_kids"].includes(pkg.youtubeAudience)) {
+    errors.push("youtubeAudience must be one of: made_for_kids, not_made_for_kids");
+  }
+  if (!["private", "unlisted", "public"].includes(pkg.youtubeVisibility)) {
+    errors.push("youtubeVisibility must be one of: private, unlisted, public");
+  }
+  if (!["standard_youtube", "creative_commons"].includes(pkg.youtubeLicense)) {
+    errors.push("youtubeLicense must be one of: standard_youtube, creative_commons");
+  }
   return errors;
 }
 

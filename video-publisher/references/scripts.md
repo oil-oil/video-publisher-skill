@@ -22,7 +22,7 @@ Run onboarding as documented in `references/configuration.md`. Set `VIDEO_PUBLIS
 
 ## Package Validation
 
-Run once for every selected platform:
+生产入口会在浏览器工作前统一校验全部所选平台。只有排查某个平台的内容包时，才单独运行：
 
 ```bash
 node scripts/check-package.mjs <platform> /absolute/path/to/package.json
@@ -35,9 +35,10 @@ xiaohongshu
 douyin
 bilibili
 wechat_channels
+youtube
 ```
 
-Validation checks the local video path, platform-specific title limits, required platform fields, package-supplied Douyin topics, and requested cover paths and ratios. Xiaohongshu uses a weighted 20-character limit: each half-width English punctuation mark and ASCII space counts as 0.5, while every other Unicode code point counts as 1. Douyin requires a valid MP4/M4V/MOV duration readable from ISO BMFF metadata; unknown duration fails closed with `DOUYIN_DURATION_UNVERIFIED`. No local duration ceiling is imposed; an explicit creator-page rejection is recorded as `PLATFORM_REJECTED_ASSET`.
+Validation checks the local video path, platform-specific title limits, required platform fields, package-supplied topic/tag data, YouTube audience/visibility/license, and requested cover paths and ratios. Xiaohongshu uses a weighted 20-character limit: each half-width English punctuation mark and ASCII space counts as 0.5, while every other Unicode code point counts as 1. Douyin requires a valid MP4/M4V/MOV duration readable from ISO BMFF metadata; unknown duration fails closed with `DOUYIN_DURATION_UNVERIFIED`. No local duration ceiling is imposed; an explicit creator-page rejection is recorded as `PLATFORM_REJECTED_ASSET`.
 
 ## Production Orchestrator
 
@@ -45,7 +46,7 @@ Validation checks the local video path, platform-specific title limits, required
 scripts/run-safe-platforms.sh \
   /absolute/path/to/package.json \
   task-suffix \
-  xiaohongshu douyin bilibili wechat_channels
+  xiaohongshu douyin bilibili wechat_channels youtube
 ```
 
 When onboarding has `declarations.originalityPolicy: all_videos_original`, the runner applies truthful original/self-made declarations without another flag. With the generic `ask_each_run` policy, add `--confirm-original-rights` only after the user confirms the current video; this one-run override is not persisted. Read-only `--inspect-only` never needs either signal.
@@ -77,7 +78,7 @@ UI concurrency is fixed at `1` and has no public override.
 
 State defaults to `~/.video-publisher/v2-jobs/<job-id>/`. The job stores the package fingerprint, numeric task-space ids, exact stable task-space names, task-space-bound receipts, observations, compact verdicts, an atomic one-generation `state.backup.json`, and schema-`2` receipt checkpoints under `checkpoints/`. An invalid primary state may recover only from a fingerprint-matching backup; the corrupt file is preserved as `state.corrupt-<timestamp>.json`, after which all platform gates are read again.
 
-上传并行执行，不设跨平台完成屏障。四个平台都先执行 `upload_start`；页面证明视频仍在上传且对应安全字段已就绪时，立即通过单宽 UI 队列执行 `prefill`，再继续等待上传完成。视频号只提前填写描述并保持短标题为空。封面、原创声明、B 站简介与创作声明、最终修复和验证不会提前。平台一旦完成上传，就进入滚动串行收尾；普通阻塞只冻结该平台。
+上传并行执行，不设跨平台完成屏障。五个平台都先执行 `upload_start`；页面证明视频仍在上传且对应安全字段已就绪时，立即通过单宽 UI 队列执行 `prefill`，再继续等待上传完成。视频号只提前填写描述并保持短标题为空；YouTube 提前填写详情和可编辑高级设置。封面、原创声明、B 站简介与创作声明、YouTube 可见性与最终步骤、最终修复和验证不会提前。平台一旦完成上传，就进入滚动串行收尾；普通阻塞只冻结该平台。
 
 Before state or browser work, production acquires the account-wide publisher lock under `${VIDEO_PUBLISHER_V2_LOCK_ROOT:-$HOME/.video-publisher/v2-locks}/publisher/`, then `<job-dir>/orchestrator.lock/`. The first is independent of `--state-root`; the second protects persisted state. Direct diagnosis proves parent-lock ownership or acquires the same lock, and each spawned Ego controller registers a token-bound member PID. Normal completion removes locks; crash recovery removes the publisher lock only after its owner and all registered members are dead.
 
@@ -109,7 +110,7 @@ node scripts/v2/run-platform.mjs \
   [numeric-task-space-id]
 ```
 
-`upload_start` 和 `prefill` 支持四个平台。`upload_start` 不是上传完成回执；`prefill` 只处理已实测稳定字段且不上传封面或原创声明，运行后仍必须执行正式 `upload`、`mutate` 和 `verify`。
+`upload_start` 和 `prefill` 支持五个平台。`upload_start` 不是上传完成回执；`prefill` 只处理已实测稳定字段且不上传封面或原创声明，运行后仍必须执行正式 `upload`、`mutate` 和 `verify`。
 
 Direct `mutate` diagnosis for Xiaohongshu, Bilibili, or WeChat Channels requires either onboarded `all_videos_original` or the one-run `--confirm-original-rights` override. `inspect`, `upload`, `verify`, and Bilibili `quarantine` remain available without either signal.
 

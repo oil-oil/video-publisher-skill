@@ -62,6 +62,59 @@ test("publisher prefills Douyin metadata before waiting for upload completion", 
   assert.equal(JSON.parse(result.stdout).ready,true);
 });
 
+test("publisher prefills YouTube details during upload and reaches verified private draft state", async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "video-publisher-v2-youtube-prefill-test-"));
+  const log = path.join(root, "events.ndjson");
+  const videoPath = path.join(root, "sample-video.mp4");
+  const packagePath = path.join(root, "package.json");
+  const configPath = path.join(root, "config.json");
+  await fs.promises.writeFile(videoPath, mp4WithDuration(30));
+  await fs.promises.writeFile(configPath, JSON.stringify({
+    schemaVersion: 2,
+    onboarding: { completed: true },
+    sourceDirectory: root,
+    availablePlatforms: ["youtube"],
+    defaultPlatforms: ["youtube"],
+    declarations: { originalityPolicy: "ask_each_run" },
+    platforms: { youtube: { defaultVisibility: "private" } },
+    execution: { checkConcurrency: 1, uploadConcurrency: 1 },
+  }));
+  await fs.promises.writeFile(packagePath, JSON.stringify({
+    videoPath,
+    title: "YouTube prefill",
+    youtubeDescription: "Fill details while uploading.",
+    youtubeTags: ["DeepSeek", "Codex"],
+    youtubeAudience: "not_made_for_kids",
+    youtubeVisibility: "private",
+    cover: { uploadCustomCover: false },
+  }));
+  const result = await run(process.execPath, [
+    path.join(V2_DIR, "publisher.mjs"),
+    packagePath,
+    "youtube-prefill",
+    "youtube",
+    "--state-root", root,
+  ], {
+    env: {
+      ...process.env,
+      VIDEO_PUBLISHER_CONFIG: configPath,
+      VIDEO_PUBLISHER_V2_RUNNER: path.join(DIR, "mock-runner.mjs"),
+      VIDEO_PUBLISHER_V2_MOCK_LOG: log,
+      VIDEO_PUBLISHER_V2_MOCK_DELAYS: JSON.stringify({
+        "youtube:upload_start": 10,
+        "youtube:prefill": 20,
+        "youtube:upload": 100,
+      }),
+    },
+  });
+  assert.equal(result.code, 0, `${result.stderr}\n${result.stdout}`);
+  const events = (await fs.promises.readFile(log, "utf8")).trim().split(/\n/).map(line => JSON.parse(line));
+  assert.deepEqual(events.filter(item => item.event === "start").map(item => item.phase), [
+    "inspect", "upload_start", "prefill", "upload", "mutate", "verify",
+  ]);
+  assert.equal(JSON.parse(result.stdout).platforms.youtube.ready, true);
+});
+
 test("publisher uses upload-time prefill for Xiaohongshu, Bilibili, and WeChat Channels", async () => {
   const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-early-prefill-platforms-test-"));
   const log=path.join(root,"events.ndjson");

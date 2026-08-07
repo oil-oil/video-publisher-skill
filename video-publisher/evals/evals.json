@@ -1,0 +1,53 @@
+{
+  "skill_name": "video-publisher",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "把 /Users/example/Movies/agent-demo-subtitled.mp4 准备到我已经配置好的小红书、抖音和 B站草稿里。标题和标签先根据字幕帮我拟一版，我确认后再上传；这条视频是我原创的。",
+      "expected_output": "检查配置和精确视频，按需读取 intake 与内容包文档，先确认文案和平台，再只调用生产入口，最终报告每个平台 READY 或结构化 blocker，绝不点击最终发布。",
+      "files": [],
+      "expectations": [
+        "先运行 config.mjs status，并且不为普通发布加载适配器或验收历史",
+        "在浏览器工作前确认精确视频、文案、平台和当前视频原创权利",
+        "发布阶段只调用 run-safe-platforms.sh，不手工拆分平台 phase",
+        "只把结构化 ready 结果视为成功，停在最终发布按钮前"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "第一次用这个发布工具。我只有抖音和 YouTube，平时两个都发；视频放在 /Users/example/Movies，YouTube 默认不公开。帮我配好，以后视频逐条确认原创。",
+      "expected_output": "检测到 onboarding 后只读取配置文档，按平台条件补齐必要信息，复述确认后用 config.mjs onboard 写入并 validate，不打开创作者页面。",
+      "files": [],
+      "expectations": [
+        "availablePlatforms 只包含用户明确拥有的抖音和 YouTube",
+        "原创策略保持 ask_each_run",
+        "YouTube 默认可见性设为 unlisted",
+        "写入前复述配置，写入后执行 validate，配置完成前不打开页面"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "刚才多平台上传到一半 Ego Lite 崩了，现在已经重新打开。继续刚才那个任务，不要重复上传已经完成的平台。",
+      "expected_output": "保留原任务并原样重跑同一生产命令，让编排器恢复状态和回执；不手动清状态、不创建第二套页面控制，也不重做已 READY 平台。",
+      "files": [],
+      "expectations": [
+        "使用同一内容包和同一生产命令恢复",
+        "不手工清理状态、锁、任务空间或回执",
+        "不回退或重做已 READY 平台",
+        "继续停在最终发布按钮前"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "修改 video-publisher：在抖音话题填写完成后确保允许下载开关是开启的，第二次运行不能重复点击。",
+      "expected_output": "识别为适配器定制，读取 customizing、共享浏览器规范和抖音文档，按 inspect-action-verify 实现幂等步骤，并保留最终发布、原创、任务空间和共享安全边界。",
+      "files": [],
+      "expectations": [
+        "只在维护路径读取 customizing-workflows、platform-common、ego-browser-workflow 和抖音平台文档",
+        "步骤先读状态，目标状态已存在时不点击",
+        "动作后独立验证开关状态",
+        "不绕过最终发布守卫、用户控制或任务空间所有权"
+      ]
+    }
+  ]
+}

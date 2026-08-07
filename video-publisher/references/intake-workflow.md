@@ -1,134 +1,86 @@
-# Intake Workflow
+# 视频与文案确认流程
 
-Start from a video link or local file path.
+仅在选择视频、检查内容和拟定内容包时读取。配置状态由主流程提前加载；这里把配置值当作建议，当前用户指令和显式内容包字段优先。
 
-## Contents
-
-- Video input and content inspection
-- Title, tags, and platform text defaults
-- Proposal and final package
-
-Before intake, run `node scripts/config.mjs status` from the Skill directory and read `content-package.md`. Use `sourceDirectory`, `availablePlatforms`, `defaultPlatforms`, `contentProfile`, platform defaults, and cover preference as proposals only. A current user instruction or explicit package field wins within `availablePlatforms`. If the user asks for an unavailable platform, confirm the account and use `config.mjs add-platform` before browser work.
-
-## Video Input
+## 视频来源
 
 ```text
-If it is a local absolute path, use it directly.
-If it is a file:// URL, convert it to a local path.
-If it is an HTTP(S) link, ask before downloading unless the link clearly points to a direct video file that the user wants published.
-If the link points to an already-published creator platform post, treat it as a reference and ask for the source video file before uploading.
+本地绝对路径：直接使用。
+file:// URL：转换为本地路径。
+明确指向视频文件的 HTTP(S) 链接：用户已经要求发布时可以下载。
+其他 HTTP(S) 链接：下载前先确认。
+已发布的平台帖子：只作为参考，必须取得原始本地视频后再上传。
 ```
 
-Before any browser upload, verify the local file exists with `ls -lh` or `test -f`, then run `scripts/check-package.mjs` for every selected platform. For Douyin, require a readable MP4/M4V/MOV duration and fail closed only when it cannot be verified. Do not impose a local duration ceiling; let the current creator page accept or reject the verified source and record any explicit platform response.
+先确认精确文件存在。路径不存在时：
 
-Before selecting any `原创`, `自制`, or equivalent declaration, require the onboarded `declarations.originalityPolicy` to be `all_videos_original`, or obtain current-video confirmation and pass the one-run `--confirm-original-rights` override. Never infer eligibility from the filename or content. This declaration signal does not change the Skill's no-final-publish boundary.
+1. 停止该文件的浏览器工作。
+2. 使用 `scripts/find-video.mjs` 或在配置的 `sourceDirectory` 中查找相近文件。
+3. 告诉用户原路径缺失并列出候选。
+4. 由用户选择；即使名称相似，也不能自动替换。
 
-If the exact path does not exist:
+相似视频可能共用标题和 tags，但上传错误文件的风险远高于暂停确认。
+
+## 内容检查
+
+拟定标题和 tags 前，按需要检查：
+
+- 文件名及附近的字幕版；
+- `.ass`、`.srt`、`.vtt` 字幕；
+- 没有外挂字幕时的内嵌字幕；
+- 用户提供的现有标题或同类内容；
+- 标题仍不明确时的视频预览或关键帧。
+
+读取 `.ass` 时重点查看 `[Events]` 中的 `Dialogue:`，先判断视频真实主题再写文案。
+
+## 文案原则
+
+- 标题贴合视频事实和用户语气，清楚、具体、自然，不夸张。
+- tags 通常选择 3–7 个相关词，覆盖主题、受众、产品和工作流；配置中的 recurring tags 只是候选。
+- 小红书话题不能含半角点 `.`，例如将确实合适的 `GPT5.6` 明确改为无点标签 `GPT56`，不能静默改写。
+- 抖音使用 1–5 个真实话题实体；显式内容包字段优先于配置默认值。
+
+平台文案习惯：
 
 ```text
-1. Stop browser work for that file.
-2. Search the source directory for nearby names, for example `*pet*skill*subtitled*.mp4` or `*subtitled*.mp4`.
-3. Tell the user the exact path was missing and show the nearest matches.
-4. Do not silently fall back to a different video, even if the filename looks similar.
+小红书：短标题和真实话题实体，默认不写正文。
+抖音：标题、简短正文和内容包提供的话题实体。
+B站：标题、简洁简介和标签 chip。
+视频号：描述以标题开头，后接普通 hashtag；短标题默认留空。
+YouTube：标题、无网页链接的完整说明、可选标签、明确受众和可见性。
 ```
 
-This matters because similarly named videos can share a title and topic package, but publishing the wrong local file is worse than pausing for clarification.
+默认使用平台封面。只有用户已经提供封面并明确要求上传时，才记录文件路径并读取 `cover-workflow.md`；本 Skill 不制作或修改封面。
 
-## Content Inspection
+## 向用户确认
 
-Before drafting title and tags, inspect the available context:
+用户没有给出完整文案时，先给出简洁提案：
 
 ```text
-Filename and nearby subtitle/caption variants
-Sidecar subtitle files: .ass, .srt, .vtt
-Embedded subtitle streams if sidecars are unavailable
-Existing Xiaohongshu titles for similar content
-Optional keyframe or video preview if the title is unclear
+视频：
+建议标题：
+建议关键词：
+平台差异：
+计划平台：
+封面：平台默认 / 上传已有文件
 ```
 
-For `.ass` subtitles, read the `[Events]` `Dialogue:` lines and summarize the real topic before drafting.
+标题和关键词确认后，从 `availablePlatforms` 中选择平台，默认建议 `defaultPlatforms`。不要假设用户拥有所有平台账号。
 
-## Title And Tag Style
-
-Title should match the user's stated voice and the video's real content: clear, conversational, specific, and curiosity-friendly.
-
-Avoid hard-selling, generic traffic bait, and exaggerated claims.
-
-Tags should usually include 3-7 terms, mixing the subject, audience, product, and workflow when relevant. Treat configured `contentProfile.recurringTags` as candidates, not mandatory tags; include only terms relevant to the current video.
-
-For Xiaohongshu, do not propose topic labels containing the half-width dot `.` because the platform does not support it in topic entities. Choose an explicit dot-free label such as `GPT56` instead of `GPT5.6`.
-
-Douyin accepts 1-5 topic entities. Explicit package topics win; otherwise use configured `platforms.douyin.defaultTopics`. Confirm account campaigns during onboarding rather than embedding them in this Skill.
-
-Neutral examples:
+写入 JSON 前完成最终确认：
 
 ```text
-主题名
-工具名
-教程
-使用技巧
-工作流
+精确视频：
+是否使用字幕版：
+统一标题与关键词：
+小红书标题与 topics：
+抖音标题、描述与 topics：
+B站标题、简介、tags 与允许保留的自动 tags：
+视频号描述与 tags：
+YouTube 标题、完整说明、tags、受众、分类、语言、许可与可见性：
+已有封面上传意图和所需文件：
+所选平台：
+当前视频原创权利依据：
 ```
 
-## Platform Text Defaults
-
-Use platform-native text habits:
-
-```text
-Xiaohongshu: title + topic entities only. No prose description by default.
-Douyin: title + short body if useful + package-supplied topic entities at the end.
-Bilibili: title + concise intro/description + tag chips.
-WeChat Channels: description field starts with title, then plain hashtags. Leave short title empty.
-```
-
-Default cover behavior comes from `cover.uploadExistingByDefault`, which should normally be `false`. Do not create cover artwork. Upload an existing cover only after obtaining its file path for the current run.
-
-Map user-supplied cover files this way:
-
-```text
-Xiaohongshu: 3:4 portrait
-WeChat Channels: both 3:4 portrait and 4:3 landscape
-Bilibili: 4:3 landscape homepage master
-Douyin: both 3:4 portrait and 4:3 landscape
-```
-
-When oil-cover outputs are supplied, use `<视频名>_4x3.png` as Bilibili’s `cover.horizontal4x3Path`.
-
-## Proposal Shape
-
-When the user has not provided title and tags:
-
-```text
-我先根据视频内容拟一个发布包：
-
-视频:
-建议标题:
-建议 tags:
-抖音 topics:
-平台差异:
-
-你觉得合适吗？可以直接改标题或 tag。
-```
-
-After the user approves title and tags, ask for platform selection from `availablePlatforms`, proposing `defaultPlatforms`. Mention that existing-cover upload is skipped by default.
-
-## Final Package
-
-Before browser form filling:
-
-```text
-视频:
-标题:
-统一关键词:
-小红书 tags:
-抖音描述:
-抖音 topics:
-B站简介:
-B站 tags:
-B站允许保留的平台自动 tags: 留空，除非用户明确确认
-视频号描述:
-视频号 tags:
-封面: 使用平台默认封面；若本轮明确要求上传已有封面，则记录所需 3:4/4:3/16:9 文件路径
-平台:
-是否使用字幕版:
-```
+只填写所选平台需要的字段。具体字段、默认值和限制见 `content-package.md`；程序会在打开创作者页面前统一校验。

@@ -1,17 +1,10 @@
-# Configuration And Onboarding
+# 配置与首次使用
 
-Keep personal defaults outside the shareable Skill directory.
+仅在首次配置、修复配置、修改默认平台或新增账号时读取。个人配置必须放在 Skill 目录之外。
 
-## Contents
+## 配置检查
 
-- Resolution and onboarding gate
-- Onboarding conversation and command
-- Non-destructive platform addition
-- Schema, migration, precedence, and privacy
-
-## Resolution And Gate
-
-Resolve the configuration in this order:
+配置路径按以下顺序解析：
 
 ```text
 VIDEO_PUBLISHER_CONFIG
@@ -19,126 +12,107 @@ $XDG_CONFIG_HOME/video-publisher/config.json
 $HOME/.config/video-publisher/config.json
 ```
 
-Run `node scripts/config.mjs status` at the start of every publishing, recovery, or live-browser diagnosis flow. Static Skill review, documentation work, and local tests do not read personal configuration. Missing, empty, invalid, unsupported-schema, or incomplete configuration sets `onboardingRequired: true`. Do not inspect creator pages until onboarding is complete.
+运行：
 
-Warnings such as a missing source directory do not erase onboarding, but repair or explicitly override that directory before using it.
+```bash
+node scripts/config.mjs status
+```
 
-## Onboarding Conversation
+缺失、空文件、无效结构、旧版迁移失败或信息不完整时，输出 `onboardingRequired: true`。完成配置前不要打开创作者页面。
 
-Follow this order so users are never asked about platforms they do not use:
+`warnings` 不会抹掉已经完成的配置，但发布前要修复或明确覆盖无效的源视频目录。
 
-1. Ask which supported creator platforms the user actually has: Xiaohongshu, Douyin, Bilibili, and WeChat Channels. Require at least one; do not preselect all four.
-2. Ask which available platforms should run by default. Propose all available platforms, but allow any non-empty subset.
-3. Ask for the default local video directory.
-4. Ask for shared copy style and recurring tags.
-5. Ask Douyin default topics only when Douyin is available. Ask the Bilibili automatic-tag allowlist only when Bilibili is available.
-6. Ask whether every video may truthfully be declared original. Keep `ask_each_run` unless the user explicitly confirms `all_videos_original`.
-7. Propose check/upload concurrency `4/4` and platform-default covers. Effective concurrency never exceeds the selected platform count.
-8. Summarize available platforms, default platforms, and the remaining choices. Write only after confirmation, then run `validate`.
+## 首次配置顺序
 
-`availablePlatforms` records the creator accounts the user says they have and can log into. `defaultPlatforms` is only the subset selected when a run does not name platforms explicitly.
+按顺序询问，避免让用户回答不使用平台的问题：
 
-## Onboarding Command
+1. 用户实际拥有并可以登录哪些账号：小红书、抖音、B站、视频号、YouTube；至少选择一个。
+2. 哪些已拥有平台作为默认发布平台；默认建议全部已拥有平台，也可选择非空子集。
+3. 默认本地视频目录。
+4. 常用文案风格和 recurring tags。
+5. 仅在拥有对应账号时询问：
+   - 抖音默认 topics；
+   - B站允许保留的平台自动 tags；
+   - YouTube 默认分类、语言和可见性。
+6. 是否每个视频都能真实声明原创。没有明确确认时使用 `ask_each_run`。
+7. 建议检查/上传并发为 `4/4`，默认使用平台封面；用户可以修改。
 
-Use repeatable `--available-platform` flags for real account availability and repeatable `--platform` flags for the default subset:
+写入前用简短清单复述全部选择并取得确认。
+
+## 写入配置
+
+`--available-platform` 表示用户实际拥有的账号，`--platform` 表示默认发布子集，两个参数都可重复：
 
 ```bash
 node scripts/config.mjs onboard \
   --source-dir "/absolute/video/directory" \
   --available-platform xiaohongshu \
   --available-platform douyin \
-  --available-platform bilibili \
   --platform xiaohongshu \
   --platform douyin \
-  --recurring-tag "Tutorial" \
-  --douyin-topic "Tutorial" \
-  --bilibili-auto-tag "Platform generated tag" \
-  --originality-policy ask_each_run
+  --locale zh-CN \
+  --copy-style "清楚、自然、具体、不夸张" \
+  --recurring-tag "教程" \
+  --douyin-topic "教程" \
+  --originality-policy ask_each_run \
+  --check-concurrency 4 \
+  --upload-concurrency 4
 ```
 
-When `--platform` is omitted, every available platform becomes a default. For compatibility, an older command that supplies `--platform` but no `--available-platform` treats the named defaults as the available set.
+未提供 `--platform` 时，全部 `--available-platform` 自动成为默认平台。
 
-Then run:
+可选参数：
+
+```text
+--bilibili-auto-tag <精确标签>          可重复
+--youtube-category <页面可见分类>
+--youtube-language <页面可见语言>
+--youtube-visibility <private|unlisted|public>
+--upload-existing-cover-by-default
+```
+
+只传递已经向用户确认的值。随后运行：
 
 ```bash
 node scripts/config.mjs validate
 ```
 
-Continue only after it exits successfully.
+只有命令成功且 `onboardingRequired` 为 `false` 才继续发布。
 
-The onboarding command also supports `--locale`, `--copy-style`, `--check-concurrency`, `--upload-concurrency`, and `--upload-existing-cover-by-default`. Include the values confirmed in the onboarding summary instead of relying on hidden defaults.
+## 新增平台
 
-## Add An Available Platform
-
-Do not rerun `onboard` merely to add an account; onboarding rebuilds a complete profile. After the user confirms the additional account, merge it without changing existing preferences:
+不要为了新增账号重新运行 `onboard`，因为它会重建完整配置。用户确认账号后使用非破坏命令：
 
 ```bash
 node scripts/config.mjs add-platform douyin \
   --default \
-  --douyin-topic "Tutorial"
+  --douyin-topic "教程"
 ```
 
-Omit `--default` when the account should be available only for explicit runs. When adding Bilibili, use repeatable `--bilibili-auto-tag` only for exact platform-generated tags the user approves. The command preserves the source directory, copy style, recurring tags, originality policy, concurrency, cover preference, and all unrelated platform settings.
+YouTube 示例：
 
-## Schema
-
-```json
-{
-  "schemaVersion": 2,
-  "onboarding": {
-    "completed": true,
-    "completedAt": "ISO-8601",
-    "updatedAt": "ISO-8601"
-  },
-  "locale": "zh-CN",
-  "sourceDirectory": "/absolute/video/directory",
-  "availablePlatforms": ["xiaohongshu", "douyin", "bilibili", "wechat_channels"],
-  "defaultPlatforms": ["xiaohongshu", "douyin"],
-  "contentProfile": {
-    "copyStyle": "clear, conversational, specific, non-hype",
-    "recurringTags": []
-  },
-  "declarations": {
-    "originalityPolicy": "ask_each_run"
-  },
-  "platforms": {
-    "douyin": { "defaultTopics": [] },
-    "bilibili": { "allowedAutoTags": [] }
-  },
-  "execution": {
-    "checkConcurrency": 4,
-    "uploadConcurrency": 4
-  },
-  "cover": {
-    "uploadExistingByDefault": false
-  }
-}
+```bash
+node scripts/config.mjs add-platform youtube \
+  --default \
+  --youtube-category "科学与技术" \
+  --youtube-language "中文（简体）" \
+  --youtube-visibility private
 ```
 
-Validation requires:
+省略 `--default` 时，该平台只在显式选择时使用。B站可以重复传入 `--bilibili-auto-tag`。
 
-- at least one available platform;
-- at least one default platform;
-- every default platform to be available;
-- only supported platform identifiers.
-
-The production publisher rejects an explicitly requested platform outside `availablePlatforms` before package or browser work. After confirming the account, use `config.mjs add-platform` instead of silently opening an unconfigured creator page or rebuilding onboarding.
-
-## Schema 1 Migration
-
-Schema 1 did not distinguish account availability from defaults. It is normalized conservatively: its old `defaultPlatforms` becomes both `availablePlatforms` and `defaultPlatforms`. This never invents an account the user did not previously select. The next configuration write persists schema 2.
-
-## Precedence And Privacy
-
-Use this precedence:
+## 优先级和隐私
 
 ```text
-explicit current-run user instruction, within availablePlatforms
-explicit content-package field
-per-user configuration
-generic Skill default
+当前用户指令（限 availablePlatforms）
+> 内容包显式字段
+> 个人配置
+> Skill 通用默认值
 ```
 
-Configuration may store reusable preferences, declared platform availability, and the explicitly onboarded standing originality policy. `ask_each_run` requires `--confirm-original-rights` for each mutating run; `all_videos_original` allows the maintained workflow to apply truthful original/self-made declarations without asking again. Never infer or silently upgrade this value.
-
-Never persist cookies, tokens, passwords, video-specific paths, or final-publish instructions. Platform availability describes declared account capability, not login credentials. Originality policy does not change the no-final-publish boundary; final publishing remains outside this Skill.
+- 当前请求不能静默加入 `availablePlatforms` 之外的平台。
+- `all_videos_original` 只表示长期内容事实，不代表允许最终发布。
+- `ask_each_run` 要求每次 mutation 前获得当前视频确认并添加 `--confirm-original-rights`。
+- 配置可以保存平台可用性、文案偏好、默认 tags、原创政策、并发和封面偏好。
+- 不保存 cookies、token、密码、单次视频路径或最终发布指令。
+- 不手工编辑 schema；使用 CLI 写入，程序负责校验、权限和旧版本迁移。

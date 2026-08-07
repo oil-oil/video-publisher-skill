@@ -30,13 +30,11 @@ If a persisted numeric id is explicitly reported as `task space not found` after
 
 Ego may recycle an existing numeric id for a different task space after restart. Before reuse, compare the live name with the persisted exact name. A mismatch is the same identity-loss class as a missing id: never inspect or mutate the colliding space, select or create only the persisted exact name, persist its current id, and invalidate receipts tied to the previous page.
 
-This fallback has passed real task-space-loss tests on all four platforms. A replacement space must start from fresh page truth, rebuild only that platform, generate new cover receipts when the old page no longer exists, persist the replacement numeric id, and leave every unaffected platform untouched.
+A replacement space must start from fresh page truth, rebuild only that platform, generate new cover receipts when the old page no longer exists, persist the replacement numeric id, and leave every unaffected platform untouched. Current acceptance boundaries are recorded in `acceptance-history.md`.
 
 If the Ego Lite process exits or returns no structured observation, return a retryable `INPUT_CHANNEL_BROKEN` blocker with all required gates false and `finalPublishClicked: false`. Do not reinterpret the missing browser channel as a missing upload input, do not start reinjection in that run, and do not throw away the persisted job. The same-job retry after Ego restarts performs normal task-space recovery and fresh inspection.
 
 Because the input channel is process-wide, one such blocker circuit-breaks all browser mutation not yet started in the invocation, including work queued for other task spaces. A sibling that completed rolling finalization before the signal remains complete. Already-started runners may finish or return their own blocker; after they exit, only still-missing final read-only verification may run.
-
-This boundary is real-tested during both parallel upload and serialized mutation. In the mutation test, Ego was terminated one second after the Douyin mutator process appeared; the two later platform mutators never started.
 
 ## Platform URLs
 
@@ -45,6 +43,7 @@ xiaohongshu: https://creator.xiaohongshu.com/publish/publish?source=official&fro
 douyin: https://creator.douyin.com/creator-micro/content/upload
 bilibili: https://member.bilibili.com/platform/upload/video/frame?spm_id_from=333.1007.top_bar.upload
 wechat_channels: https://channels.weixin.qq.com/platform/post/create
+youtube: https://studio.youtube.com/
 ```
 
 ## File Upload
@@ -58,6 +57,8 @@ Bilibili video inputs declare extensions such as `.mp4,.mov`; do not identify th
 Bilibili may keep detached 1×1 video inputs next to the active uploader. Scope upload to `.bcc-upload-wrapper input[type=file]`. When recovery navigates from another creator page to the upload URL, re-arm the final-publish guard and activate the new page lifecycle before exposing the input. A hidden navigated page was observed accepting the file into `input.files` without starting the upload component. Require visible upload progress or completed target evidence within 20 seconds after injection.
 
 WeChat Channels is different: both its hidden video input and cover image input live in Wujie/open-root content. Find the real input across roots, get its remote object id, then call `DOM.setFileInputFiles`. The top-document `uploadFile('#selector', path)` helper cannot reach an id placed inside that shadow tree.
+
+YouTube Studio uses separate native file inputs for video and thumbnail. Preserve their existing ids/attributes, activate the hidden task-space page lifecycle before injection, and wait for upload, processing, and checks to finish. Thumbnail success requires the accepted server URL, not only a local preview.
 
 ```js
 const evaluated = await cdp('Runtime.evaluate', {

@@ -10,6 +10,7 @@ import {
   validateDouyinPackage,
   validateWechatChannelsPackage,
   validateXiaohongshuPackage,
+  validateYoutubePackage,
 } from "../lib/content-package.mjs";
 import { loadConfig } from "../lib/config.mjs";
 import { inspectMediaFile, validateMediaForPlatform } from "../lib/media.mjs";
@@ -23,8 +24,14 @@ import { runPool, SerialQueue } from "./lib/scheduler.mjs";
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = path.join(os.homedir(), ".video-publisher", "v2-jobs");
 const RIGHTS_PLATFORMS = new Set(["xiaohongshu", "bilibili", "wechat_channels"]);
-const EARLY_PREFILL_PLATFORMS = new Set(["xiaohongshu", "douyin", "bilibili", "wechat_channels"]);
-const validators = { xiaohongshu: validateXiaohongshuPackage, douyin: validateDouyinPackage, bilibili: validateBilibiliPackage, wechat_channels: validateWechatChannelsPackage };
+const EARLY_PREFILL_PLATFORMS = new Set(["xiaohongshu", "douyin", "bilibili", "wechat_channels", "youtube"]);
+const validators = {
+  xiaohongshu: validateXiaohongshuPackage,
+  douyin: validateDouyinPackage,
+  bilibili: validateBilibiliPackage,
+  wechat_channels: validateWechatChannelsPackage,
+  youtube: validateYoutubePackage,
+};
 
 class UsageError extends Error {}
 const activeLockReleases = [];

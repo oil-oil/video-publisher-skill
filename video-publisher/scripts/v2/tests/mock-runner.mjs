@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { requiredGates } from "../lib/model.mjs";
 
 const [platform, , phase, taskSuffix, taskSpaceRaw] = process.argv.slice(2);
-const taskSpaceId = Number(process.env.VIDEO_PUBLISHER_V2_MOCK_TASK_SPACE_ID || taskSpaceRaw) || ({ xiaohongshu: 11, douyin: 12, bilibili: 13, wechat_channels: 14 }[platform]);
+const taskSpaceId = Number(process.env.VIDEO_PUBLISHER_V2_MOCK_TASK_SPACE_ID || taskSpaceRaw) || ({ xiaohongshu: 11, douyin: 12, bilibili: 13, wechat_channels: 14, youtube: 15 }[platform]);
 const taskSpace = process.env.VIDEO_PUBLISHER_V2_TASK_NAME || `video publisher v2 ${platform} ${taskSuffix}`;
 const phaseKey = `${platform}:${phase}`;
 const delays = JSON.parse(process.env.VIDEO_PUBLISHER_V2_MOCK_DELAYS || "{}");

@@ -24,8 +24,8 @@ function usage() {
     "  node scripts/config.mjs add-platform <platform> [--default] [platform options]",
     "",
     "Repeatable options:",
-    "  --available-platform <xiaohongshu|douyin|bilibili|wechat_channels>",
-    "  --platform <xiaohongshu|douyin|bilibili|wechat_channels>  Default platform; must be available",
+    "  --available-platform <xiaohongshu|douyin|bilibili|wechat_channels|youtube>",
+    "  --platform <xiaohongshu|douyin|bilibili|wechat_channels|youtube>  Default platform; must be available",
     "  --recurring-tag <tag>",
     "  --douyin-topic <topic>",
     "  --bilibili-auto-tag <tag>",
@@ -37,13 +37,16 @@ function usage() {
     "  --check-concurrency <integer>",
     "  --upload-concurrency <integer>",
     "  --upload-existing-cover-by-default",
+    "  --youtube-category <visible label>",
+    "  --youtube-language <visible label>",
+    "  --youtube-visibility <private|unlisted|public>",
     "  --default  Add the platform to defaultPlatforms as well",
   ].join("\n");
 }
 
 function parseOptions(argv) {
   const repeatable = new Set(["--available-platform", "--platform", "--recurring-tag", "--douyin-topic", "--bilibili-auto-tag"]);
-  const single = new Set(["--source-dir", "--locale", "--copy-style", "--originality-policy", "--check-concurrency", "--upload-concurrency"]);
+  const single = new Set(["--source-dir", "--locale", "--copy-style", "--originality-policy", "--check-concurrency", "--upload-concurrency", "--youtube-category", "--youtube-language", "--youtube-visibility"]);
   const boolean = new Set(["--upload-existing-cover-by-default", "--default"]);
   const result = {};
   for (let index = 0; index < argv.length; index += 1) {
@@ -82,10 +85,20 @@ try {
     const [platform, ...optionArgs] = argv;
     if (!CONFIG_PLATFORMS.includes(platform)) throw new Error(`unsupported available platform: ${platform || "(missing)"}`);
     const options = parseOptions(optionArgs);
-    const disallowed = Object.keys(options).filter(flag => !["--default", "--douyin-topic", "--bilibili-auto-tag"].includes(flag));
+    const disallowed = Object.keys(options).filter(flag => ![
+      "--default",
+      "--douyin-topic",
+      "--bilibili-auto-tag",
+      "--youtube-category",
+      "--youtube-language",
+      "--youtube-visibility",
+    ].includes(flag));
     if (disallowed.length) throw new Error(`unsupported add-platform option: ${disallowed.join(", ")}`);
     if (options["--douyin-topic"]?.length && platform !== "douyin") throw new Error("--douyin-topic is valid only when adding douyin");
     if (options["--bilibili-auto-tag"]?.length && platform !== "bilibili") throw new Error("--bilibili-auto-tag is valid only when adding bilibili");
+    if (["--youtube-category", "--youtube-language", "--youtube-visibility"].some(flag => options[flag] !== undefined) && platform !== "youtube") {
+      throw new Error("YouTube options are valid only when adding youtube");
+    }
     const current = loadConfig({ configPath, requireOnboarded: true });
     const updated = {
       ...current,
@@ -103,6 +116,12 @@ try {
         bilibili: {
           ...current.platforms.bilibili,
           ...(options["--bilibili-auto-tag"] ? { allowedAutoTags: options["--bilibili-auto-tag"] } : {}),
+        },
+        youtube: {
+          ...current.platforms.youtube,
+          ...(options["--youtube-category"] !== undefined ? { defaultCategory: options["--youtube-category"] } : {}),
+          ...(options["--youtube-language"] !== undefined ? { defaultLanguage: options["--youtube-language"] } : {}),
+          ...(options["--youtube-visibility"] !== undefined ? { defaultVisibility: options["--youtube-visibility"] } : {}),
         },
       },
     };
@@ -148,6 +167,11 @@ try {
       platforms: {
         douyin: { defaultTopics: options["--douyin-topic"] || [] },
         bilibili: { allowedAutoTags: options["--bilibili-auto-tag"] || [] },
+        youtube: {
+          defaultCategory: options["--youtube-category"] || "",
+          defaultLanguage: options["--youtube-language"] || "",
+          defaultVisibility: options["--youtube-visibility"] || "private",
+        },
       },
       execution: {
         checkConcurrency: positive(options["--check-concurrency"], 4, "--check-concurrency"),

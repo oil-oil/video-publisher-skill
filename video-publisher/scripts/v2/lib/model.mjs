@@ -1,4 +1,4 @@
-export const PLATFORMS = ["xiaohongshu", "douyin", "bilibili", "wechat_channels"];
+export const PLATFORMS = ["xiaohongshu", "douyin", "bilibili", "wechat_channels", "youtube"];
 
 export const BLOCKER = Object.freeze({
   AUTH_REQUIRED: "AUTH_REQUIRED",
@@ -30,6 +30,11 @@ const REQUIRED_GATES = Object.freeze({
   wechat_channels: [
     "authenticated", "draftIdentity", "video", "description", "shortTitle", "original",
     "cover", "noBlockingDialog", "finalButton", "safety",
+  ],
+  youtube: [
+    "authenticated", "draftIdentity", "video", "title", "description", "tags",
+    "audience", "settings", "cover", "visibility", "noBlockingDialog",
+    "finalButton", "safety",
   ],
 });
 

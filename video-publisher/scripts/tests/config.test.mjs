@@ -166,3 +166,35 @@ test("default platforms must be selected from available creator accounts", async
   }), /defaultPlatforms must be a subset of availablePlatforms: douyin/);
   await fs.promises.rm(root, { recursive: true, force: true });
 });
+
+test("YouTube can be added non-destructively with private publishing defaults", async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "video-publisher-config-youtube-"));
+  const configPath = path.join(root, "config.json");
+  const initial = createOnboardedConfig({
+    sourceDirectory: root,
+    availablePlatforms: ["bilibili"],
+    defaultPlatforms: ["bilibili"],
+    contentProfile: { copyStyle: "Personal style", recurringTags: ["AI"] },
+  });
+  writeConfig(initial, configPath);
+  const result = await run(process.execPath, [
+    SCRIPT_PATH,
+    "add-platform",
+    "youtube",
+    "--default",
+    "--youtube-category", "科学与技术",
+    "--youtube-language", "中文（简体）",
+    "--youtube-visibility", "private",
+  ], { env: { ...process.env, VIDEO_PUBLISHER_CONFIG: configPath } });
+  assert.equal(result.code, 0, `${result.stderr}\n${result.stdout}`);
+  const updated = JSON.parse(result.stdout).config;
+  assert.deepEqual(updated.availablePlatforms, ["bilibili", "youtube"]);
+  assert.deepEqual(updated.defaultPlatforms, ["bilibili", "youtube"]);
+  assert.deepEqual(updated.platforms.youtube, {
+    defaultCategory: "科学与技术",
+    defaultLanguage: "中文（简体）",
+    defaultVisibility: "private",
+  });
+  assert.deepEqual(updated.contentProfile, { copyStyle: "Personal style", recurringTags: ["AI"] });
+  await fs.promises.rm(root, { recursive: true, force: true });
+});

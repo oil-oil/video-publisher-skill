@@ -32,7 +32,7 @@ export function codePointLength(value) {
 export function xiaohongshuTitleLength(value) {
   let halfUnits = 0;
   for (const character of Array.from(String(value || ""))) {
-    halfUnits += character === " " || /[!-/:-@[-`{-~]/u.test(character) ? 1 : 2;
+    halfUnits += character.codePointAt(0) <= 0x7f ? 1 : 2;
   }
   return halfUnits / 2;
 }

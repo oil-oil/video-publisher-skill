@@ -38,7 +38,7 @@ wechat_channels
 youtube
 ```
 
-Validation checks the local video path, platform-specific title limits, required platform fields, package-supplied topic/tag data, YouTube audience/visibility/license, and requested cover paths and ratios. Xiaohongshu uses a weighted 20-character limit: each half-width English punctuation mark and ASCII space counts as 0.5, while every other Unicode code point counts as 1. Douyin requires a valid MP4/M4V/MOV duration readable from ISO BMFF metadata; unknown duration fails closed with `DOUYIN_DURATION_UNVERIFIED`. No local duration ceiling is imposed; an explicit creator-page rejection is recorded as `PLATFORM_REJECTED_ASSET`.
+Validation checks the local video path, platform-specific title limits, required platform fields, package-supplied topic/tag data, YouTube audience/visibility/license, and requested cover paths and ratios. Xiaohongshu uses a weighted 20-character limit: every ASCII code point, including English letters, digits, spaces, and half-width punctuation, counts as 0.5, while every non-ASCII Unicode code point counts as 1. Preserve the original title whenever this weighted length is within the limit. Douyin requires a valid MP4/M4V/MOV duration readable from ISO BMFF metadata; unknown duration fails closed with `DOUYIN_DURATION_UNVERIFIED`. No local duration ceiling is imposed; an explicit creator-page rejection is recorded as `PLATFORM_REJECTED_ASSET`.
 
 ## Production Orchestrator
 

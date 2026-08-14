@@ -10,6 +10,7 @@ import {
   validateDouyinPackage,
   validateXiaohongshuPackage,
   validateYoutubePackage,
+  xiaohongshuTitleLength,
 } from "../lib/content-package.mjs";
 import { defaultConfig, normalizeConfig } from "../lib/config.mjs";
 import {
@@ -202,11 +203,16 @@ test("Bilibili titles and non-ASCII Xiaohongshu titles use Unicode code points",
   });
 });
 
-test("Xiaohongshu title counts half-width English punctuation and spaces as half characters", async () => {
+test("Xiaohongshu title counts every ASCII character as half a character", async () => {
   await withTempDir(async root => {
     const packagePath = path.join(root, "package.json");
+    const originalTitle = "DeepSeek Harness 安装上手和使用心得";
+    assert.equal(xiaohongshuTitleLength(originalTitle), 17.5);
+    assert.equal(xiaohongshuTitleLength("A1 !".repeat(10)), 20);
+    assert.equal(xiaohongshuTitleLength("A".repeat(41)), 20.5);
+
     await fs.promises.writeFile(packagePath, JSON.stringify({
-      title: `${"中".repeat(19)} !`,
+      title: originalTitle,
       xhsTopics: ["Test"],
     }));
     assert.deepEqual(
@@ -215,7 +221,16 @@ test("Xiaohongshu title counts half-width English punctuation and spaces as half
     );
 
     await fs.promises.writeFile(packagePath, JSON.stringify({
-      title: `${"中".repeat(19)} !?`,
+      title: "A".repeat(40),
+      xhsTopics: ["Test"],
+    }));
+    assert.deepEqual(
+      validateXiaohongshuPackage(readPackage(packagePath, { config: defaultConfig() })),
+      [],
+    );
+
+    await fs.promises.writeFile(packagePath, JSON.stringify({
+      title: "A".repeat(41),
       xhsTopics: ["Test"],
     }));
     assert.match(

@@ -29,6 +29,7 @@ description: 使用 Ego Lite 将本地视频安全准备为小红书、抖音、
    - 精确本地视频；
    - 从 `availablePlatforms` 中选择的平台；
    - 标题、平台文案和 tags/topics；
+   - 小红书标题按加权长度不超过 20：所有 ASCII 字符算 0.5，其他 Unicode 字符算 1；未超限时保留原始标题；
    - 当前视频的原创权利依据；
    - 是否上传用户已经提供的封面。
 4. 将确认后的内容包 JSON 写到 Skill 目录之外。只有明确上传已有封面时才读取 `references/cover-workflow.md`。

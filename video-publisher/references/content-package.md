@@ -44,7 +44,7 @@ xhsTitle | xiaohongshuTitle：可选标题覆盖
 xhsTopics：至少一个真实话题标签，不得包含半角点 `.`
 ```
 
-标题加权长度不得超过 20：半角英文标点和 ASCII 空格算 0.5，其余 Unicode code point 算 1。
+标题加权长度不得超过 20：所有 ASCII 字符（英文字母、数字、空格和半角标点）算 0.5，其他 Unicode code point 算 1。加权长度未超限时保留原始标题。
 
 ### 抖音
 

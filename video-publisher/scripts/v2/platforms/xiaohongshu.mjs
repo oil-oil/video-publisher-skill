@@ -271,21 +271,33 @@ async function uploadXhsCover() {
   for (let attempt = 0; attempt < 2 && !tab.ok; attempt += 1) {
     await removeExactStaleMask(/设置封面/);
     try {
-      await click('.cover-plugin-preview .default.row, .cover-plugin-preview .default.column', { label: 'open xhs cover editor' });
+      const entry = await js(String.raw`(() => {
+        const compact=value=>String(value||'').replace(/\s+/g,' ').trim()
+        const el=document.querySelector('.cover-edit-entry-text')
+          ||[...document.querySelectorAll('span,div,button')].find(e=>e.children.length===0&&compact(e.textContent)==='编辑封面')
+          ||document.querySelector('.cover-plugin-preview .default.row, .cover-plugin-preview .default.column')
+        if(!el)return {ok:false,reason:'xiaohongshu cover entry missing'}
+        el.id='vp2-xhs-cover-entry';return {ok:true,selector:'#vp2-xhs-cover-entry'}
+      })()`);
+      if (!entry.ok) { tab = entry; continue; }
+      await click(entry.selector, { label: 'open xhs cover editor' });
     } catch (error) {
       tab = { ok: false, reason: `xiaohongshu cover preview click failed: ${String(error?.message || error)}` };
       continue;
     }
-    for (let index = 0; index < 20; index += 1) {
+    for (let index = 0; index < 90; index += 1) {
       const exposed = await js(String.raw`(() => {
         const compact=value=>String(value||'').replace(/\s+/g,' ').trim()
         const item=[...document.querySelectorAll('.d-tabs-header')]
           .find(el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return compact(el.innerText||el.textContent||'')==='上传封面'&&r.width>10&&r.height>10&&s.display!=='none'&&s.visibility!=='hidden'})
+        const imageInput=[...document.querySelectorAll('input[type=file]')].find(el=>/image/i.test(el.accept||''))
+        if(!item&&imageInput)return {ok:true,viaInput:true}
         if(!item)return {ok:false}
         item.id='vp2-xhs-upload-cover-tab';item.scrollIntoView({block:'center',inline:'center'});return {ok:true,selector:'#vp2-xhs-upload-cover-tab'}
       })()`);
       if (exposed.ok) {
         try {
+          if (exposed.viaInput) { tab = { ok: true, attempt: attempt + 1, waited: index * 0.5, viaInput: true }; break; }
           await click(exposed.selector, { label: 'activate xhs upload-cover tab' });
           tab = { ok: true, attempt: attempt + 1, waited: index * 0.5 };
         } catch (error) {
@@ -293,7 +305,7 @@ async function uploadXhsCover() {
         }
         break;
       }
-      await wait(0.5);
+      await wait(2);
     }
   }
   if (!tab.ok) return tab;
@@ -311,11 +323,11 @@ async function uploadXhsCover() {
     if(!item)return {ok:false,reason:'xiaohongshu 3:4 crop chip missing'}
     item.click(); return {ok:true,className:String(item.className||'')}
   })()`);
-  if (!ratio.ok) return ratio;
+  if (!ratio.ok && ratio.reason !== 'xiaohongshu 3:4 crop chip missing') return ratio;
   await wait(1);
   const confirmed = await js(String.raw`(() => {
     const modal=[...document.querySelectorAll('.d-modal')].find(el=>/设置封面/.test(el.innerText||el.textContent||''))
-    const button=[...(modal?.querySelectorAll('button')||[])].find(el=>String(el.innerText||el.textContent||'').replace(/\s+/g,' ').trim()==='确定'&&!el.disabled)
+    const button=[...(modal?.querySelectorAll('button')||[])].find(el=>/^(确定|完成)$/.test(String(el.innerText||el.textContent||'').replace(/\s+/g,' ').trim())&&!el.disabled)
     if(!button)return {ok:false,reason:'xiaohongshu cover confirm missing or disabled'}
     button.click(); return {ok:true}
   })()`);

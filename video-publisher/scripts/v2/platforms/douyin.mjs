@@ -150,7 +150,22 @@ async function uploadDouyin() {
     const after=await inspectDouyin();
     if(after.gates.video.ok)return {...after,actions:{upload:{mode:'injected'},uploadAttempts:attempts.concat({attempt,result:'ready'})}};
     const video=after.gates.video.evidence||{};
-    if(video.failed===true&&attempt<2){await wait(2);before=after;continue;}
+    if(video.failed===true&&attempt<2){
+      // 抖音在失败态编辑器里重新注入不会恢复：实测同一页面连续 4 次注入全部
+      // explicit_failure，而导航到干净上传页后首次注入即成功。失败后先回到
+      // 干净上传页，放弃残留草稿，重新挂载最终发布保护，再重试。
+      await gotoAndWait(PLATFORM_URLS.douyin,{timeout:45,settle:2});
+      await wait(3);
+      await armFinalPublishGuard().catch(()=>{});
+      const resumed=await inspectDouyin();
+      if(resumed.gates.video.evidence?.resumeDialog){
+        const point=await js(String.raw`(() => {const c=v=>String(v||'').replace(/\s+/g,' ').trim();const item=[...document.querySelectorAll('button,[role="button"],div,span')].map(el=>({el,text:c(el.innerText||el.textContent||''),r:el.getBoundingClientRect()})).filter(x=>x.text==='放弃'&&x.r.width>12&&x.r.height>=8&&x.r.width<160&&x.r.height<70).sort((a,b)=>a.r.width*a.r.height-b.r.width*b.r.height)[0];if(!item)return null;const r=item.r;return{x:r.left+r.width/2,y:r.top+r.height/2}})()`);
+        if(point){await click([point.x,point.y],{label:'discard failed douyin upload'}).catch(()=>{});await wait(1.5);}
+      }
+      attempts.push({attempt,result:'navigated_clean_upload_page'});
+      before=await inspectDouyin();
+      continue;
+    }
     const blocker=video.failed===true
       ? typedBlocker('PLATFORM_REJECTED_ASSET','抖音明确显示视频上传失败，已完成一次有界重试',{retryable:true,evidence:{attempts,video}})
       : typedBlocker('UPLOAD_STALLED','抖音视频没有在等待窗口内稳定完成',{retryable:true,evidence:{attempts,video}});

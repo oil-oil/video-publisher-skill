@@ -44,10 +44,12 @@ Validation checks the local video path, platform-specific title limits, required
 
 ```bash
 scripts/run-safe-platforms.sh \
-  /absolute/path/to/package.json \
-  task-suffix \
-  xiaohongshu douyin bilibili wechat_channels youtube
+  --package /absolute/path/to/package.json \
+  --task-suffix task-suffix \
+  --platforms xiaohongshu,douyin,bilibili,wechat_channels,youtube
 ```
+
+位置参数仍然可用：`scripts/run-safe-platforms.sh package.json task-suffix xiaohongshu douyin`。
 
 When onboarding has `declarations.originalityPolicy: all_videos_original`, the runner applies truthful original/self-made declarations without another flag. With the generic `ask_each_run` policy, add `--confirm-original-rights` only after the user confirms the current video; this one-run override is not persisted. Read-only `--inspect-only` never needs either signal.
 
@@ -66,13 +68,62 @@ scripts/run-safe-platforms.sh \
 Options:
 
 ```text
+--package <path>
+--platform <name>          (repeatable)
+--platforms a,b,c
+--task-suffix <name>
+--operation <auto|create|resume|inspect|replace-cover|repost>
 --inspect-only
+--replace-cover            replace covers on an existing READY draft; requires --job-id
+--confirm-new-copy         required with --operation repost
 --confirm-original-rights
 --state-root <dir>
 --job-id <id>
 --check-concurrency <positive integer>
 --upload-concurrency <positive integer>
+--fresh-space              (default) new Ego space for a new job
+--reuse-space              keep the recorded space name; also --no-fresh-space
+--force-fresh-space        new space even when resuming an in-progress job
+--keep-space               (default) leave this job's draft pages open after READY
+--close-on-complete        close this job's spaces after READY; also --close-space / --no-keep-space
+--cleanup-stale-spaces     (default) close other ready/inspected job spaces and oil-collect-publish
+--no-cleanup-stale-spaces
+--cleanup-only             close leftover spaces and exit; package is optional
+--cleanup-name <name>      extra exact leftover names, repeatable or comma-separated
+--cleanup-prefix <text>    extra leftover name prefixes; never the default publisher prefix
+--space-prefix <name>
+--space-name <name>        exact space name; single-platform only
+--space-suffix <text>      replace the generated unique suffix
 ```
+
+Space policy: a new job gets a unique space. `running`, `inspecting`, `paused_user`, and `blocked` jobs reuse the recorded space so drafts and receipts stay attached. An implicit rerun of a `READY` job exits with usage error and performs no browser work. After READY, this job's draft pages stay open so the user can click publish. That keep-flag is written to `state.json`. Stale cleanup only closes retired spaces, leftover `oil-collect-publish`, and other `ready`/`inspected` jobs that were explicitly closed with `--close-on-complete`. `--inspect-only` does not close an in-progress or kept job. `--cleanup-only --package` takes the job lock and can close a finished job's current spaces; it never closes an in-progress job. It does not prefix-sweep `video publisher v2 *`. `USER_CONTROL` never closes spaces.
+
+To resume an interrupted generation, repeat the same command with the same `--job-id`, or add `--operation resume`. To inspect a READY draft use `--operation inspect`. To create an intentional second copy use `--operation repost --confirm-new-copy`; omit `--job-id` for a generated new identity, or provide a new unused id. To close leftover spaces without generating: `scripts/run-safe-platforms.sh --cleanup-only`.
+
+Replace covers on an existing READY draft without uploading the video again:
+
+```bash
+scripts/run-safe-platforms.sh \
+  --package /absolute/path/to/package-with-new-cover.json \
+  --job-id existing-ready-job-id \
+  --platforms xiaohongshu \
+  --operation replace-cover
+```
+
+The replacement package must keep the exact video, title, descriptions, tags, and settings. It must set `cover.uploadCustomCover=true` and change only mapped cover files. The orchestrator reuses the recorded task space, invalidates only affected cover receipts, then runs `inspect -> mutate -> verify`. If another existing platform's mapped cover also changed, include that platform in the same command. Published-content editing is outside this draft orchestrator and must never be represented as a successful replacement without a separate live-page workflow and explicit authorization to save the online change.
+
+只恢复或重开同一多平台 Job 的部分平台时，保留原 Job 的其他待发布页面：
+
+```bash
+scripts/run-safe-platforms.sh \
+  --package /absolute/path/to/package.json \
+  --job-id existing-job-id \
+  --platforms xiaohongshu,douyin,bilibili \
+  --force-fresh-space \
+  --no-cleanup-stale-spaces
+```
+
+清理计划会保护当前 Job 中全部现用空间，即使历史 `retiredSpaces` 记录与现用空间重复也不能关闭它们。子集恢复仍必须显式关闭 stale cleanup，避免清理其他已完成 Job；任务完成后另行运行受控清理。
 
 UI concurrency is fixed at `1` and has no public override.
 

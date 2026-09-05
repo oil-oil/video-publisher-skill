@@ -15,11 +15,20 @@ import {
 import { loadConfig } from "../lib/config.mjs";
 import { inspectMediaFile, validateMediaForPlatform } from "../lib/media.mjs";
 import { buildIdentity } from "./lib/identity.mjs";
-import { acquireJobLock, resolvePublisherLockDirectory } from "./lib/job-lock.mjs";
+import { acquireJobLock, JobBusyError, resolvePublisherLockDirectory } from "./lib/job-lock.mjs";
 import { JobStore } from "./lib/job-store.mjs";
 import { BLOCKER, PLATFORMS, classifyVerdict, compactVerdict, evaluateObservation, videoReceiptFromObservation } from "./lib/model.mjs";
 import { parseV2Result } from "./lib/result-line.mjs";
 import { runPool, SerialQueue } from "./lib/scheduler.mjs";
+import { parsePublisherArgs, uniqueSpaceSuffix } from "./lib/cli-args.mjs";
+import {
+  IN_PROGRESS_STATUSES,
+  buildCleanupPlan,
+  buildSpaceName,
+  cleanupTaskSpaces,
+  retireCurrentSpaces,
+  shouldRotateSpaces,
+} from "./lib/spaces.mjs";
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = path.join(os.homedir(), ".video-publisher", "v2-jobs");
@@ -44,49 +53,13 @@ function positive(raw, name) {
 }
 
 function parseArgs(argv) {
-  const config = loadConfig({ requireOnboarded: true });
-  const options = {
-    inspectOnly: false,
-    originalRightsConfirmed: false,
-    originalityPolicy: config.declarations.originalityPolicy,
-    stateRoot: DEFAULT_ROOT,
-    jobId: "",
-    checkConcurrency: config.execution.checkConcurrency,
-    uploadConcurrency: config.execution.uploadConcurrency,
-  };
-  const positional = [];
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
-    if (arg === "--inspect-only") { options.inspectOnly = true; continue; }
-    if (arg === "--confirm-original-rights") { options.originalRightsConfirmed = true; continue; }
-    const setters = {
-      "--state-root": value => { options.stateRoot = path.resolve(value); },
-      "--job-id": value => { options.jobId = value; },
-      "--check-concurrency": value => { options.checkConcurrency = positive(value, arg); },
-      "--upload-concurrency": value => { options.uploadConcurrency = positive(value, arg); },
-    };
-    if (setters[arg]) {
-      if (!argv[index + 1]) throw new UsageError(`${arg} requires a value`);
-      setters[arg](argv[++index]);
-      continue;
-    }
-    if (arg.startsWith("--")) throw new UsageError(`Unknown option: ${arg}`);
-    positional.push(arg);
-  }
-  if (!positional.length) throw new UsageError("Usage: publisher.mjs <package.json> [task-suffix] [platform...] [--inspect-only|--confirm-original-rights]");
-  const packagePath = path.resolve(positional.shift());
-  let taskSuffix = "manual";
-  if (positional.length && !PLATFORMS.includes(positional[0])) taskSuffix = positional.shift();
-  const platforms = [...new Set(positional.length ? positional : config.defaultPlatforms)];
-  if (platforms.some(platform => !PLATFORMS.includes(platform))) throw new UsageError("Unsupported platform argument");
-  const unavailablePlatforms = platforms.filter(platform => !config.availablePlatforms.includes(platform));
-  if (unavailablePlatforms.length) {
-    throw new UsageError(`Platform is not configured as available: ${unavailablePlatforms.join(", ")}. Update Video Publisher onboarding before browser work.`);
-  }
-  if (options.jobId && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(options.jobId)) {
-    throw new UsageError("--job-id must be 1-128 characters using only letters, numbers, dot, underscore, or hyphen, and must start with a letter or number");
-  }
-  return { ...options, packagePath, taskSuffix, platforms };
+  return parsePublisherArgs(argv, {
+    loadConfig,
+    PLATFORMS,
+    UsageError,
+    positive,
+    defaultStateRoot: DEFAULT_ROOT,
+  });
 }
 
 function runCapture(command, args, options = {}) {
@@ -103,9 +76,13 @@ function runCapture(command, args, options = {}) {
 
 function initialState(jobId, identity, args) {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     jobId,
     fingerprint: identity.fingerprint,
+    contentFingerprint: identity.contentFingerprint,
+    coverFingerprint: identity.coverFingerprint,
+    coverFingerprints: identity.coverFingerprints,
+    cover: identity.cover,
     packagePath: args.packagePath,
     taskSuffix: args.taskSuffix,
     createdAt: new Date().toISOString(),
@@ -114,12 +91,150 @@ function initialState(jobId, identity, args) {
     scheduler: { checkConcurrency: args.checkConcurrency, uploadConcurrency: args.uploadConcurrency, uiConcurrency: 1 },
     video: identity.video,
     assets: identity.assets,
+    revisions: [{ at: new Date().toISOString(), operation: args.operation, fingerprint: identity.fingerprint, packagePath: args.packagePath }],
     platforms: Object.fromEntries(args.platforms.map(platform => [platform, { status: "new", taskSpaceId: null, taskSpaceName: null, videoReceipt: null, receipts: {}, verdict: null, history: [] }])),
   };
 }
 
+function sameVideo(left, right) {
+  return left?.size === right?.size && left?.sha256 === right?.sha256;
+}
+
+async function resolveStoredIdentity(state) {
+  if (state.contentFingerprint && state.coverFingerprints) return state;
+  if (!state.packagePath || !fs.existsSync(state.packagePath)) return null;
+  const storedPackage = readPackage(state.packagePath);
+  const storedIdentity = await buildIdentity(storedPackage);
+  return [storedIdentity.fingerprint, storedIdentity.previousFingerprint, storedIdentity.legacyFingerprint].includes(state.fingerprint) ? storedIdentity : null;
+}
+
+async function prepareCoverReplacement(store, state, identity, args) {
+  if (state.status !== "ready") throw new UsageError(`replace-cover requires a READY draft; current status is ${state.status || "unknown"}`);
+  if (identity.cover?.uploadCustomCover !== true) throw new UsageError("replace-cover requires cover.uploadCustomCover=true and explicit replacement files");
+  const storedIdentity = await resolveStoredIdentity(state);
+  if (!storedIdentity?.contentFingerprint || !storedIdentity?.coverFingerprints) {
+    throw new UsageError("This legacy job cannot prove its original content identity. Create a fresh verified draft before using replace-cover.");
+  }
+  if (!sameVideo(state.video || storedIdentity.video, identity.video)) {
+    throw new UsageError("replace-cover cannot change the video file");
+  }
+  if (storedIdentity.contentFingerprint !== identity.contentFingerprint) {
+    throw new UsageError("replace-cover may change only cover settings and cover files; title, description, tags, video, and other metadata must stay unchanged");
+  }
+  const affectedPlatforms = Object.keys(identity.coverFingerprints)
+    .filter(platform => storedIdentity.coverFingerprints[platform] !== identity.coverFingerprints[platform]);
+  if (!affectedPlatforms.length) throw new UsageError("replace-cover found no changed cover asset");
+  const missingTargets = affectedPlatforms.filter(platform => state.platforms[platform] && !args.platforms.includes(platform));
+  if (missingTargets.length) {
+    throw new UsageError(`replace-cover must include every existing draft whose cover changed: ${missingTargets.join(", ")}`);
+  }
+  for (const platform of args.platforms) {
+    if (!state.platforms[platform]) throw new UsageError(`replace-cover cannot target a platform absent from this job: ${platform}`);
+    if (!affectedPlatforms.includes(platform)) throw new UsageError(`replace-cover cover is unchanged for: ${platform}`);
+    const item = state.platforms[platform];
+    if (!item.taskSpaceId && !item.taskSpaceName) throw new UsageError(`replace-cover has no recorded Ego draft space for: ${platform}`);
+  }
+  const previous = { at: new Date().toISOString(), operation: "replace-cover", from: state.fingerprint, to: identity.fingerprint, packagePath: args.packagePath, platforms: args.platforms };
+  state.schemaVersion = 4;
+  state.fingerprint = identity.fingerprint;
+  state.contentFingerprint = identity.contentFingerprint;
+  state.coverFingerprint = identity.coverFingerprint;
+  state.coverFingerprints = identity.coverFingerprints;
+  state.cover = identity.cover;
+  state.packagePath = args.packagePath;
+  state.video = identity.video;
+  state.assets = identity.assets;
+  state.revisions ||= [];
+  state.revisions.push(previous);
+  if (state.revisions.length > 20) state.revisions = state.revisions.slice(-20);
+  for (const [platform, item] of Object.entries(state.platforms)) {
+    if (item.videoReceipt) item.videoReceipt = { ...item.videoReceipt, fingerprint: identity.fingerprint };
+    item.receipts ||= {};
+    if (item.receipts.uploadStart?.fingerprint) {
+      item.receipts.uploadStart = { ...item.receipts.uploadStart, fingerprint: identity.fingerprint };
+    }
+    await store.clearReceiptCheckpoint(platform);
+  }
+  for (const platform of args.platforms) {
+    const item = state.platforms[platform];
+    delete item.receipts.cover;
+    item.verdict = null;
+    item.status = "needs_mutation";
+  }
+  args.freshSpace = false;
+  args.forceFreshSpace = false;
+  await store.save();
+}
+
+async function migrateLegacyIdentity(store, state, identity, args) {
+  if (![identity.previousFingerprint, identity.legacyFingerprint].includes(state.fingerprint) || state.fingerprint === identity.fingerprint) return;
+  const previousFingerprint = state.fingerprint;
+  state.schemaVersion = 4;
+  state.fingerprint = identity.fingerprint;
+  state.contentFingerprint = identity.contentFingerprint;
+  state.coverFingerprint = identity.coverFingerprint;
+  state.coverFingerprints = identity.coverFingerprints;
+  state.cover = identity.cover;
+  state.packagePath = args.packagePath;
+  state.video = identity.video;
+  state.assets = identity.assets;
+  state.revisions ||= [];
+  state.revisions.push({ at: new Date().toISOString(), operation: "identity-migration", from: previousFingerprint, to: identity.fingerprint, packagePath: args.packagePath });
+  for (const [platform, item] of Object.entries(state.platforms || {})) {
+    if (item.videoReceipt) item.videoReceipt = { ...item.videoReceipt, fingerprint: identity.fingerprint };
+    item.receipts ||= {};
+    if (item.receipts.uploadStart?.fingerprint) item.receipts.uploadStart = { ...item.receipts.uploadStart, fingerprint: identity.fingerprint };
+    if (platform === "youtube" && previousFingerprint === identity.legacyFingerprint && identity.cover?.uploadCustomCover === true) {
+      delete item.receipts.cover;
+      item.verdict = null;
+      item.status = "needs_mutation";
+      state.status = "blocked";
+    }
+    await store.clearReceiptCheckpoint(platform);
+  }
+  await store.save();
+}
+
+async function persistKeepSpace(store, state, args, closeCurrent) {
+  if (args.keepSpace) state.keepSpace = true;
+  else if (closeCurrent) state.keepSpace = false;
+  await store.save();
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (args.cleanupOnly) {
+    let state = { jobId: args.jobId || "", platforms: {}, retiredSpaces: [] };
+    let statePath = "";
+    if (args.packagePath) {
+      if (!fs.existsSync(args.packagePath)) throw new Error(`Package JSON not found: ${args.packagePath}`);
+      const pkg = readPackage(args.packagePath);
+      const identity = await buildIdentity(pkg);
+      const jobId = args.jobId || identity.fingerprint.slice(0, 16);
+      const jobDir = path.join(args.stateRoot, jobId);
+      const release = acquireJobLock(jobDir, { jobId, packagePath: args.packagePath });
+      try {
+        const store = new JobStore(jobDir, initialState(jobId, identity, args));
+        state = await store.initialize();
+        statePath = store.statePath;
+        const inProgress = IN_PROGRESS_STATUSES.includes(state.status);
+        const plan = await maybeCleanupSpaces(args, state, {
+          complete: !inProgress,
+          userControl: false,
+          incomingInProgress: inProgress,
+        });
+        if (plan?.closeCurrent) state.keepSpace = false;
+        await store.save();
+        await store.close();
+      } finally {
+        release();
+      }
+    } else {
+      await maybeCleanupSpaces(args, state, { complete: false, userControl: false, incomingInProgress: false });
+    }
+    console.log(JSON.stringify({ ok: true, cleanupOnly: true, jobId: state.jobId || "", statePath, stateRoot: args.stateRoot }, null, 2));
+    return;
+  }
   if (!fs.existsSync(args.packagePath)) throw new Error(`Package JSON not found: ${args.packagePath}`);
   const pkg = readPackage(args.packagePath);
   const media = inspectMediaFile(pkg.videoPath);
@@ -139,8 +254,14 @@ async function main() {
     throw new UsageError(`Originality confirmation is required before browser mutation for: ${rightsTargets.join(", ")}. Complete onboarding with declarations.originalityPolicy=all_videos_original, or confirm this run and add --confirm-original-rights.`);
   }
   const identity = await buildIdentity(pkg);
-  const jobId = args.jobId || identity.fingerprint.slice(0, 16);
+  const jobId = args.jobId || (args.operation === "repost"
+    ? `${identity.fingerprint.slice(0, 12)}-${uniqueSpaceSuffix()}`
+    : identity.fingerprint.slice(0, 16));
   const jobDir = path.join(args.stateRoot, jobId);
+  const stateExisted = fs.existsSync(path.join(jobDir, "state.json"));
+  if (args.operation === "replace-cover" && !stateExisted) throw new UsageError(`replace-cover job does not exist: ${jobId}`);
+  if (["resume"].includes(args.operation) && !stateExisted) throw new UsageError(`${args.operation} requires an existing job: ${jobId}`);
+  if (["create", "repost"].includes(args.operation) && stateExisted) throw new UsageError(`${args.operation} requires a new job id; job already exists: ${jobId}`);
   const publisherRelease = acquireJobLock(resolvePublisherLockDirectory(), {
     jobId,
     packagePath: args.packagePath,
@@ -149,8 +270,67 @@ async function main() {
   publisherLockToken = publisherRelease.token;
   activeLockReleases.push(publisherRelease);
   activeLockReleases.push(acquireJobLock(jobDir, { jobId, packagePath: args.packagePath }));
-  const store = new JobStore(jobDir, initialState(jobId, identity, args));
+  const expectedState = initialState(jobId, identity, args);
+  if (args.operation === "replace-cover") expectedState.fingerprint = null;
+  const store = new JobStore(jobDir, expectedState, {
+    acceptedFingerprints: args.operation === "replace-cover" ? [] : [identity.previousFingerprint, identity.legacyFingerprint],
+  });
   const state = await store.initialize();
+  if (args.operation !== "replace-cover") await migrateLegacyIdentity(store, state, identity, args);
+  const incomingStatus = state.status;
+  const incomingInProgress = IN_PROGRESS_STATUSES.includes(incomingStatus);
+  if (args.operation === "auto" && stateExisted && incomingStatus === "ready") {
+    throw new UsageError(`Job ${jobId} is already READY. Use --operation inspect, --operation replace-cover, or --operation repost --confirm-new-copy.`);
+  }
+  if (args.operation === "resume" && incomingStatus === "ready") {
+    throw new UsageError(`Job ${jobId} is already READY; resume will not create another draft`);
+  }
+  if (args.operation === "replace-cover") await prepareCoverReplacement(store, state, identity, args);
+  else {
+    state.schemaVersion = 4;
+    state.contentFingerprint ||= identity.contentFingerprint;
+    state.coverFingerprint ||= identity.coverFingerprint;
+    state.coverFingerprints ||= identity.coverFingerprints;
+    state.cover ||= identity.cover;
+  }
+  if (args.operation === "inspect" && stateExisted) args.freshSpace = false;
+  if (args.keepSpace) state.keepSpace = true;
+  if (shouldRotateSpaces(args, state)) {
+    const stamp = args.spaceSuffix || uniqueSpaceSuffix();
+    retireCurrentSpaces(state, args.platforms);
+    for (const platform of args.platforms) {
+      const item = state.platforms[platform];
+      if (!item) continue;
+      item.taskSpaceId = null;
+      item.taskSpaceName = buildSpaceName({
+        spaceName: args.spaceName,
+        spacePrefix: args.spacePrefix,
+        platform,
+        taskSuffix: args.taskSuffix,
+        jobId,
+        stamp,
+      });
+      item.receipts = {};
+      item.receiptTaskSpaceId = null;
+      item.videoReceipt = null;
+      await store.clearReceiptCheckpoint(platform);
+    }
+  } else if (args.spaceName) {
+    for (const platform of args.platforms) {
+      const item = state.platforms[platform];
+      if (!item) continue;
+      if (item.taskSpaceName && item.taskSpaceName !== args.spaceName) {
+        retireCurrentSpaces(state, [platform]);
+        item.taskSpaceId = null;
+        item.receipts = {};
+        item.receiptTaskSpaceId = null;
+        item.videoReceipt = null;
+        await store.clearReceiptCheckpoint(platform);
+      }
+      item.taskSpaceName = args.spaceName;
+    }
+  }
+  await store.save();
   if (store.lastRecovery) {
     console.error(`[video-publisher-v2] restored corrupt job state from atomic backup; preserved=${store.lastRecovery.corruptPath}`);
   }
@@ -272,11 +452,15 @@ async function main() {
   await runPool(runnablePlatforms, args.checkConcurrency, platform => invoke(platform, "inspect"));
   if (args.inspectOnly) {
     const hardBlocked = args.platforms.some(platform => ["blocked", "blocked_user", "blocked_foreign_draft"].includes(state.platforms[platform].status));
-    state.status = runnablePlatforms.length === args.platforms.length && !hardBlocked ? "inspected" : "blocked";
-    await store.save();
+    const selectedReady = args.platforms.every(platform => state.platforms[platform].verdict?.ready === true);
+    state.status = incomingStatus === "ready"
+      ? (selectedReady ? "ready" : "blocked")
+      : incomingInProgress ? incomingStatus : (hardBlocked ? "blocked" : "inspected");
+    const plan = await maybeCleanupSpaces(args, state, { complete: false, userControl, incomingInProgress });
+    await persistKeepSpace(store, state, args, plan?.closeCurrent === true);
     await store.close();
     console.log(JSON.stringify(summary(state, args.platforms, store.statePath), null, 2));
-    if (state.status === "blocked") process.exitCode = 10;
+    if (hardBlocked || userControl) process.exitCode = 10;
     return;
   }
 
@@ -337,7 +521,7 @@ async function main() {
   // Start every missing upload first. Platforms with live-proven editable upload
   // states may prefill metadata through the same one-wide UI queue, then resume
   // their completion wait before final mutation and verification.
-  const uploadTargets = inputChannelBroken || userControl ? [] : runnablePlatforms.filter(platform => state.platforms[platform].status === "needs_upload");
+  const uploadTargets = inputChannelBroken || userControl || args.operation === "replace-cover" ? [] : runnablePlatforms.filter(platform => state.platforms[platform].status === "needs_upload");
   console.error(`[video-publisher-v2] upload parallel=${args.uploadConcurrency}: ${uploadTargets.join(",") || "none"}`);
   const uploadPool = runPool(uploadTargets, args.uploadConcurrency, async platform => {
     if (inputChannelBroken || userControl) return;
@@ -345,11 +529,23 @@ async function main() {
       const started=await invoke(platform, "upload_start");
       if (inputChannelBroken || userControl || terminalStatuses.has(state.platforms[platform].status)) return;
       if (started.observation.actions?.upload?.stage === "editable_uploading") {
+        let prefillResult = null;
         await ui.enqueue(async () => {
           if (inputChannelBroken || userControl || terminalStatuses.has(state.platforms[platform].status)) return;
-          await invoke(platform, "prefill");
+          prefillResult = await invoke(platform, "prefill");
         });
-        if (inputChannelBroken || userControl || terminalStatuses.has(state.platforms[platform].status)) return;
+        if (inputChannelBroken || userControl) return;
+        if (terminalStatuses.has(state.platforms[platform].status)) {
+          const prefillVerdict = prefillResult?.verdict;
+          const safeToDefer = prefillVerdict?.blocker?.retryable === true
+            && prefillVerdict?.gates?.video?.evidence?.uploading === true
+            && ![BLOCKER.AUTH_REQUIRED, BLOCKER.USER_CONTROL, BLOCKER.INPUT_CHANNEL_BROKEN, BLOCKER.RISK_CONTROL]
+              .includes(prefillVerdict?.blocker?.code);
+          if (!safeToDefer) return;
+          state.platforms[platform].status = "needs_upload";
+          await store.save();
+          console.error(`[video-publisher-v2] ${platform} prefill deferred until upload completion: ${prefillVerdict.blocker.code}`);
+        }
       }
       if (canAdvance(platform)) {
         scheduleAdvance(platform);
@@ -382,15 +578,32 @@ async function main() {
 
   const complete = args.platforms.every(platform => state.platforms[platform].verdict?.ready === true);
   state.status = userControl ? "paused_user" : complete ? "ready" : "blocked";
-  await store.save(); await store.close();
+  const plan = await maybeCleanupSpaces(args, state, { complete, userControl, incomingInProgress });
+  await persistKeepSpace(store, state, args, plan?.closeCurrent === true);
+  await store.close();
   console.log(JSON.stringify(summary(state, args.platforms, store.statePath), null, 2));
   if (!complete) process.exitCode = 10;
 }
 
+async function maybeCleanupSpaces(args, state, { complete, userControl, incomingInProgress = false }) {
+  const plan = buildCleanupPlan(args, state, { complete, userControl, incomingInProgress });
+  if (!plan) return null;
+  try {
+    const cleaned = await cleanupTaskSpaces(plan);
+    if (cleaned.closed.length) {
+      console.error(`[video-publisher-v2] closed task spaces: ${cleaned.closed.map(item => item.name || item.id).join(", ")}`);
+    }
+  } catch (error) {
+    console.error(`[video-publisher-v2] task space cleanup skipped: ${String(error?.message || error)}`);
+  }
+  return plan;
+}
+
 function summary(state, platforms, statePath) {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     jobId: state.jobId,
+    operation: state.revisions?.at(-1)?.operation || "unknown",
     status: state.status,
     ready: platforms.every(platform => state.platforms[platform].verdict?.ready === true),
     statePath,
@@ -405,7 +618,7 @@ function summary(state, platforms, statePath) {
 main()
   .catch(error => {
     console.error(`[video-publisher-v2] fatal: ${String(error?.stack || error)}`);
-    process.exitCode = error instanceof UsageError ? 2 : 1;
+    process.exitCode = error instanceof UsageError ? 2 : error instanceof JobBusyError ? 1 : 1;
   })
   .finally(() => {
     for (const release of activeLockReleases.reverse()) release();

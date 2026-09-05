@@ -1,6 +1,6 @@
 # Bilibili Adapter Contract
 
-Read `platform-common.md` and `ego-browser-workflow.md` first.
+Before changing the Bilibili adapter, read `platform-common.md` and `ego-browser-workflow.md`.
 
 ## Contents
 

@@ -1,6 +1,6 @@
 # Douyin Adapter Contract
 
-Read `platform-common.md` and `ego-browser-workflow.md` first.
+Before changing the Douyin adapter, read `platform-common.md` and `ego-browser-workflow.md`.
 
 ## Package Topics
 

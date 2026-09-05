@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import { requiredGates } from "../lib/model.mjs";
 
-const [platform, , phase, taskSuffix, taskSpaceRaw] = process.argv.slice(2);
+const [platform, packagePath, phase, taskSuffix, taskSpaceRaw] = process.argv.slice(2);
 const taskSpaceId = Number(process.env.VIDEO_PUBLISHER_V2_MOCK_TASK_SPACE_ID || taskSpaceRaw) || ({ xiaohongshu: 11, douyin: 12, bilibili: 13, wechat_channels: 14, youtube: 15 }[platform]);
 const taskSpace = process.env.VIDEO_PUBLISHER_V2_TASK_NAME || `video publisher v2 ${platform} ${taskSuffix}`;
 const phaseKey = `${platform}:${phase}`;
@@ -15,6 +15,14 @@ if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
 const brokenChannel = process.env.VIDEO_PUBLISHER_V2_MOCK_BROKEN_CHANNEL === phaseKey;
 const configuredBlocker = blockers[phaseKey] || null;
 const gates = Object.fromEntries(requiredGates(platform).map(name => [name, { ok: phase === "mutate" || phase === "verify", evidence: {} }]));
+const expectedReceipts = JSON.parse(process.env.VIDEO_PUBLISHER_V2_RECEIPTS || "{}");
+const packageData = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+if (process.env.VIDEO_PUBLISHER_V2_MOCK_EXISTING_READY === "1" && phase === "inspect") {
+  for (const name of Object.keys(gates)) gates[name] = { ok: true, evidence: {} };
+  if (packageData.cover?.uploadCustomCover === true && !expectedReceipts.cover) {
+    gates.cover = { ok: false, evidence: { reason: "desired cover receipt missing" } };
+  }
+}
 gates.authenticated = { ok: true, evidence: {} };
 gates.draftIdentity = { ok: true, evidence: {} };
 gates.noBlockingDialog = { ok: true, evidence: {} };

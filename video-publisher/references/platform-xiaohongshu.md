@@ -1,6 +1,6 @@
 # Xiaohongshu Adapter Contract
 
-Read `platform-common.md` and `ego-browser-workflow.md` first.
+Before changing the Xiaohongshu adapter, read `platform-common.md` and `ego-browser-workflow.md`.
 
 ## Account Defaults
 
@@ -42,13 +42,15 @@ Do not insert `.tiptap-topic` HTML manually.
 
 Open `内容设置`, enable `原创声明`, accept the agreement checkbox when a dialog appears, and click the dialog’s `声明原创` control. That dialog control is not the final publish button.
 
-Verify the enabled toggle from a fresh inspection. A click attempt is insufficient.
+The current switch uses `.d-switch-simulator.checked` and `.d-switch-simulator.unchecked`. Read the nested checkbox first and otherwise compare class tokens exactly; substring matching is forbidden because `unchecked` contains `checked`.
+
+After accepting the agreement, wait for Vue to enable `声明原创` before clicking it. A disabled confirmation is a blocker, not a successful toggle. Verify both the enabled switch and the closed agreement dialog from a fresh inspection.
 
 ## Custom Cover
 
 Default to the platform cover unless the package explicitly enables an existing-cover upload. Use the user-provided `3:4` asset.
 
-The tested editor entry is the real preview control under `.default.row` or `.default.column`. Open it with a real browser click, then poll for a visible `上传封面` tab instead of assuming a fixed render delay; one clean reopen is allowed when the asynchronous dialog does not materialize. Upload through the image input, choose the crop ratio matching the asset when exposed, and confirm the editor.
+The current editor exposes a hover-only `.cover-edit-entry`. Pointer movement can remove that element before the click event completes, so this is a live-proven native-handler exception: invoke that exact entry’s page click handler before falling back to a stable preview click. Then poll for `.main-cover-editor-modal` and prefer its direct image input; the current editor may show only `上传` and `完成`, without a separate `上传封面` tab. Choose the crop ratio matching the asset when exposed and confirm the editor.
 
 Accept the cover only when the main editor exposes the uploaded preview URL, normally on `ros-preview.xhscdn.com`, and no cover dialog blocks the page. Store that URL in the receipt and require the verify phase to find it again.
 

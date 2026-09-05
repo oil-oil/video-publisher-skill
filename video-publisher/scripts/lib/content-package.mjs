@@ -89,8 +89,10 @@ export function coverUploadEnabled(cover = {}) {
 
 export function coverAssetsForPlatform(pkg, platform) {
   const cover = pkg.cover || {};
-  const verticalPath = String(cover.vertical3x4Path || "").trim();
-  const horizontalPath = String(cover.horizontal4x3Path || "").trim();
+  const override = cover.platforms?.[platform] || {};
+  const verticalPath = String(override.vertical3x4Path || cover.vertical3x4Path || "").trim();
+  const horizontalPath = String(override.horizontal4x3Path || cover.horizontal4x3Path || "").trim();
+  const widescreenPath = String(override.horizontal16x9Path || cover.horizontal16x9Path || "").trim();
   const mapping = {
     xiaohongshu: verticalPath ? [{ slot: "portrait", ratio: "3:4", path: verticalPath }] : [],
     wechat_channels: [
@@ -102,8 +104,8 @@ export function coverAssetsForPlatform(pkg, platform) {
       ...(verticalPath ? [{ slot: "portrait", ratio: "3:4", path: verticalPath }] : []),
       ...(horizontalPath ? [{ slot: "landscape", ratio: "4:3", path: horizontalPath }] : []),
     ],
-    youtube: cover.horizontal16x9Path
-      ? [{ slot: "thumbnail", ratio: "16:9", path: String(cover.horizontal16x9Path).trim() }]
+    youtube: widescreenPath
+      ? [{ slot: "thumbnail", ratio: "16:9", path: widescreenPath }]
       : [],
   };
   return mapping[platform] || [];
@@ -133,6 +135,16 @@ export function readPackage(packagePath, { config: suppliedConfig } = {}) {
     vertical3x4Path: String(parsed.cover?.vertical3x4Path || "").trim(),
     horizontal4x3Path: String(parsed.cover?.horizontal4x3Path || "").trim(),
     horizontal16x9Path: String(parsed.cover?.horizontal16x9Path || "").trim(),
+    platforms: Object.fromEntries(
+      ["xiaohongshu", "douyin", "bilibili", "wechat_channels", "youtube"].map(platform => {
+        const value = parsed.cover?.platforms?.[platform] || {};
+        return [platform, {
+          vertical3x4Path: String(value.vertical3x4Path || "").trim(),
+          horizontal4x3Path: String(value.horizontal4x3Path || "").trim(),
+          horizontal16x9Path: String(value.horizontal16x9Path || "").trim(),
+        }];
+      }),
+    ),
   };
   const douyinTopicSource = Array.isArray(parsed.douyinTopics)
     ? parsed.douyinTopics

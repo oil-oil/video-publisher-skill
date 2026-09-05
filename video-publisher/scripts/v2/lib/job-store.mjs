@@ -20,7 +20,7 @@ async function readState(filePath) {
 }
 
 export class JobStore {
-  constructor(jobDir, initialState) {
+  constructor(jobDir, initialState, options = {}) {
     this.jobDir = jobDir;
     this.statePath = path.join(jobDir, "state.json");
     this.backupPath = path.join(jobDir, "state.backup.json");
@@ -30,6 +30,7 @@ export class JobStore {
     this.sequence = 0;
     this.queue = Promise.resolve();
     this.lastRecovery = null;
+    this.acceptedFingerprints = new Set(options.acceptedFingerprints || []);
   }
 
   async initialize() {
@@ -46,7 +47,7 @@ export class JobStore {
     if (fs.existsSync(this.statePath)) {
       try {
         this.state = await readState(this.statePath);
-        if (expectedFingerprint && this.state.fingerprint !== expectedFingerprint) {
+        if (expectedFingerprint && this.state.fingerprint !== expectedFingerprint && !this.acceptedFingerprints.has(this.state.fingerprint)) {
           throw new Error(`Job state belongs to another package: ${this.statePath}`);
         }
       } catch (primaryError) {
@@ -60,7 +61,7 @@ export class JobStore {
             + `primary=${String(primaryError?.message || primaryError)}; backup=${String(backupError?.message || backupError)}`,
           );
         }
-        if (expectedFingerprint && backup.fingerprint !== expectedFingerprint) {
+        if (expectedFingerprint && backup.fingerprint !== expectedFingerprint && !this.acceptedFingerprints.has(backup.fingerprint)) {
           throw new Error(`Job state backup belongs to another package: ${this.backupPath}`);
         }
         const recoveredAt = new Date().toISOString();

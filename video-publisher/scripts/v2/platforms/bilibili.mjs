@@ -9,7 +9,7 @@ const bilibiliCoverPath = String(pkg.cover?.horizontal4x3Path || '');
 
 async function inspectBilibili() {
   const state=await js(String.raw`((expectedName,expectedStem,expectedTitle,expectedDescription,requestedTags,allowedAutoTags) => {
-    const compact=v=>String(v||'').replace(/\s+/g,' ').trim();const visible=el=>{if(!el)return false;const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>4&&r.height>4&&s.display!=='none'&&s.visibility!=='hidden'};const text=compact(document.body.innerText||'');
+    const compact=v=>String(v||'').replace(/\s+/g,' ').trim();const visible=el=>{if(!el)return false;const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>4&&r.height>4&&s.display!=='none'&&s.visibility!=='hidden'};const text=compact(document.body?.innerText||'');
     const titleInput=[...document.querySelectorAll('input')].find(el=>(el.placeholder||'').includes('稿件标题'));const title=String(titleInput?.value||'').trim();
     const desc=compact([...document.querySelectorAll('.ql-editor[contenteditable="true"],[contenteditable="true"]')].find(el=>/ql-editor/.test(String(el.className||'')))?.innerText||'');
     const chips=[...document.querySelectorAll('#tag-container .tag-pre-wrp .label-item-v2-container')].map(el=>compact(el.querySelector('.label-item-v2-content')?.innerText||el.innerText||el.textContent||'')).filter(Boolean);

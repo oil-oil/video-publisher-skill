@@ -140,6 +140,29 @@ test("Bilibili maps and validates the 4:3 homepage master", async () => {
   });
 });
 
+test("platform cover overrides do not change sibling platform mappings", async () => {
+  await withTempDir(async root => {
+    const sharedPath = path.join(root, "shared-4x3.png");
+    const bilibiliPath = path.join(root, "bilibili-4x3.png");
+    const packagePath = path.join(root, "package.json");
+    await fs.promises.writeFile(sharedPath, pngHeader(1440, 1080));
+    await fs.promises.writeFile(bilibiliPath, pngHeader(1440, 1080));
+    await fs.promises.writeFile(packagePath, JSON.stringify({
+      title: "Platform cover override",
+      bilibiliDescription: "Description",
+      bilibiliTags: ["Test"],
+      cover: {
+        uploadCustomCover: true,
+        horizontal4x3Path: sharedPath,
+        platforms: { bilibili: { horizontal4x3Path: bilibiliPath } },
+      },
+    }));
+    const pkg = readPackage(packagePath, { config: defaultConfig() });
+    assert.equal(coverAssetsForPlatform(pkg, "bilibili")[0].path, bilibiliPath);
+    assert.equal(coverAssetsForPlatform(pkg, "douyin").find(asset => asset.slot === "landscape").path, sharedPath);
+  });
+});
+
 test("Bilibili rejects a 16:9 image in the 4:3 primary cover field", async () => {
   await withTempDir(async root => {
     const wrongCoverPath = path.join(root, "cover-16x9.png");

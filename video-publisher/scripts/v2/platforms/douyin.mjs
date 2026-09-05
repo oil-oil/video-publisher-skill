@@ -350,7 +350,15 @@ async function removeDouyinTrailingTopicQuery(tag, expectedCommitted = []) {
 
 async function addDouyinTopic(tag) {
   const queryTag=String(tag).replace(/\s+/g,'');
-  const findRow=()=>js(String.raw`((tag) => {const c=v=>String(v||'').replace(/\s+/g,' ').trim();const expected='#'+String(tag).toLowerCase();const containers=[...document.querySelectorAll('[class*="mention-suggest-item-container"],.mention-suggest-mount-dom')].filter(el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'});const rows=containers.flatMap(container=>[...container.querySelectorAll('*')]).map(el=>({text:c(el.innerText||el.textContent||''),r:el.getBoundingClientRect()})).filter(item=>item.r.height>20&&item.r.height<90&&item.r.width>150&&(item.text.toLowerCase()===expected||item.text.toLowerCase().startsWith(expected+' '))).sort((a,b)=>a.text.length-b.text.length);const item=rows[0];return item?{x:item.r.left+Math.min(56,item.r.width/3),y:item.r.top+item.r.height/2,text:item.text}:null})(${JSON.stringify(queryTag)})`);
+  const findRow=()=>js(String.raw`((tag) => {
+    const c=v=>String(v||'').replace(/\s+/g,' ').trim();const expected='#'+String(tag).toLowerCase();
+    const visible=el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'};
+    const direct=[...document.querySelectorAll('[class*="mention-suggest-item-container"]')].filter(visible).map(el=>({el,text:c(el.innerText||el.textContent||''),r:el.getBoundingClientRect()})).filter(item=>item.r.height>20&&item.r.height<90&&item.r.width>150&&(item.text.toLowerCase()===expected||item.text.toLowerCase().startsWith(expected+' ')));
+    const containers=[...document.querySelectorAll('.mention-suggest-mount-dom')].filter(visible);
+    const legacy=containers.flatMap(container=>[...container.querySelectorAll('*')]).map(el=>({el,text:c(el.innerText||el.textContent||''),r:el.getBoundingClientRect()})).filter(item=>item.r.height>20&&item.r.height<90&&item.r.width>150&&(item.text.toLowerCase()===expected||item.text.toLowerCase().startsWith(expected+' ')));
+    const item=(direct.length?direct:legacy).sort((a,b)=>a.text.length-b.text.length||a.r.width*a.r.height-b.r.width*b.r.height)[0];
+    return item?{x:item.r.left+Math.min(56,item.r.width/3),y:item.r.top+item.r.height/2,text:item.text,direct:direct.includes(item)}:null;
+  })(${JSON.stringify(queryTag)})`);
   const attempts=[];
   for(let attempt=1;attempt<=3;attempt+=1){
     const before=await inspectDouyin();
@@ -362,7 +370,14 @@ async function addDouyinTopic(tag) {
     if(!buttonPoint)return {ok:false,reason:'douyin add-topic button missing',attempts};
     try{await click([buttonPoint.x,buttonPoint.y],{label:`open douyin topic ${tag}`})}catch(error){return {ok:false,reason:String(error?.message||error),attempts}}
     await wait(.7);await cdp('Input.insertText',{text:queryTag});await wait(1.4);
-    const typed=await inspectDouyinTrailingPlainText();
+    let typed=await inspectDouyinTrailingPlainText();
+    if(!String(typed.trimmed||'')){
+      const refocused=await focusDouyinEditorEnd();
+      if(refocused.ok){
+        await cdp('Input.insertText',{text:'#'+queryTag});await wait(1.4);
+        typed=await inspectDouyinTrailingPlainText();
+      }
+    }
     if(String(typed.trimmed||'').toLowerCase()!==('#'+queryTag).toLowerCase()){
       const cleanup=await removeDouyinTrailingTopicQuery(queryTag,committedBefore);
       attempts.push({attempt,result:'query_not_exact',typed,cleanup});
@@ -379,6 +394,14 @@ async function addDouyinTopic(tag) {
     try{await click([row.x,row.y],{label:`commit douyin topic ${tag}`})}catch(error){return {ok:false,reason:String(error?.message||error),tag,attempts}}
     await wait(1.4);
     let state=await inspectDouyin();let committed=(state.gates.tags.evidence?.selected||[]).some(value=>normalizeDouyinTopic(value)===normalizeDouyinTopic(tag));
+    if(!committed){
+      const refocused=await focusDouyinEditorEnd();
+      if(refocused.ok){
+        await pressKey('ArrowDown').catch(()=>{});await wait(.25);
+        await pressKey('Enter').catch(()=>{});await wait(1.2);
+        state=await inspectDouyin();committed=(state.gates.tags.evidence?.selected||[]).some(value=>normalizeDouyinTopic(value)===normalizeDouyinTopic(tag));
+      }
+    }
     if(!committed){const retry=await findRow();if(retry){await click([retry.x,retry.y],{label:`retry douyin topic ${tag}`}).catch(()=>{});await wait(1.2);state=await inspectDouyin();committed=(state.gates.tags.evidence?.selected||[]).some(value=>normalizeDouyinTopic(value)===normalizeDouyinTopic(tag))}}
     if(committed){await pressKey('ArrowRight').catch(()=>{});await cdp('Input.insertText',{text:' '}).catch(()=>{});await wait(.3);return {ok:true,text:row.text,attempts:[...attempts,{attempt,result:'committed'}]}}
     const cleanup=await removeDouyinTrailingTopicQuery(queryTag,committedBefore);

@@ -38,6 +38,22 @@ B站：horizontal4x3Path
 YouTube：horizontal16x9Path
 ```
 
+多平台 Job 只替换一个平台时，使用平台专用覆盖。例如只替换 B 站，不影响同样使用 4:3 的抖音和视频号：
+
+```json
+{
+  "cover": {
+    "uploadCustomCover": true,
+    "horizontal4x3Path": "/absolute/path/shared-4x3.png",
+    "platforms": {
+      "bilibili": {
+        "horizontal4x3Path": "/absolute/path/new-bilibili-4x3.png"
+      }
+    }
+  }
+}
+```
+
 oil-cover 产出的 `<视频名>_4x3.png` 对应 B站 `horizontal4x3Path`；编辑器可将该首页 4:3 主封面同步到个人空间 16:9 槽。
 
 生产入口会在打开页面前检查文件存在性和精确比例，不需要逐平台重复运行校验命令。
@@ -68,3 +84,19 @@ YouTube：接受的 16:9 缩略图必须是绑定当前 videoId 的服务端 URL
 ```
 
 所有封面操作继续使用生产编排器的单宽 UI 队列。
+
+## 替换已验证草稿的封面
+
+沿用原 Job，新建一个内容包文件，只替换 `cover` 中对应路径，其他字段保持完全一致：
+
+```bash
+scripts/run-safe-platforms.sh \
+  --package /absolute/path/to/package-with-new-cover.json \
+  --job-id existing-ready-job-id \
+  --platforms xiaohongshu \
+  --operation replace-cover
+```
+
+程序在打开页面前校验视频和非封面内容身份。通过后复用原 Ego 草稿空间，只让变化平台的封面回执失效，并执行 `inspect -> mutate -> verify`。出现 `upload_start`、`prefill` 或 `upload` 都属于失败，不得宣称替换成功。
+
+该命令只处理仍在 Ego 任务空间中的 `READY` 草稿。已经发布的线上内容需要独立编辑流程；没有用户对具体内容和保存动作的明确授权时，不得点击保存。

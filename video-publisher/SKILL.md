@@ -1,6 +1,6 @@
 ---
 name: video-publisher
-description: 使用 Ego Lite 将本地视频安全准备为小红书、抖音、B站、视频号或 YouTube 的已验证草稿。用户要求配置创作者账号、确认本地视频与发布文案、上传已有封面、并行准备多平台草稿、恢复中断任务、检查草稿状态，或维护创作者页面流程时使用。始终停在最终发布按钮前。不用于视频剪辑、封面制作、纯文案请求或泛平台建议。
+description: 使用 Ego Lite 将本地视频安全准备为小红书、抖音、B站、视频号或 YouTube 的已验证草稿。用户要求配置创作者账号、确认本地视频、标题和 tags、上传或替换已有封面、并行准备多平台草稿、恢复中断任务、检查草稿状态，或维护创作者页面流程时使用。始终停在最终发布按钮前。不用于视频剪辑、封面制作、公众号长文或泛平台建议。
 ---
 
 # 视频发布
@@ -28,7 +28,7 @@ description: 使用 Ego Lite 将本地视频安全准备为小红书、抖音、
 3. 读取 `references/intake-workflow.md` 和 `references/content-package.md`，确认：
    - 精确本地视频；
    - 从 `availablePlatforms` 中选择的平台；
-   - 标题、平台文案和 tags/topics；
+   - 标题和 tags/topics；不要写平台长文案，平台若必填描述就用标题或标题加 tags；
    - 小红书标题按加权长度不超过 20：所有 ASCII 字符算 0.5，其他 Unicode 字符算 1；未超限时保留原始标题；
    - 当前视频的原创权利依据；
    - 是否上传用户已经提供的封面。
@@ -39,15 +39,21 @@ description: 使用 Ego Lite 将本地视频安全准备为小红书、抖音、
    scripts/run-safe-platforms.sh <package.json> [task-suffix] [platform...]
    ```
 
+   命名参数：`--package`、`--platform` / `--platforms`、`--task-suffix`、`--job-id`、`--operation`、`--space-name`、`--reuse-space`、`--cleanup-only`。默认新任务开新 Ego 空间；中断恢复复用已记录空间。草稿就绪后**留下本次空间**，方便你在发布按钮前检查并手动点发布。只清过期采集空间和已退役的旧空间。要在就绪后立刻关掉本次空间，才加 `--close-on-complete`。
+
+   已经 `READY` 的 Job 默认拒绝再次创建草稿。用户明确要重发时使用全新 Job，并加 `--operation repost --confirm-new-copy`。替换同一草稿的已有封面时，读取 `references/cover-workflow.md`，沿用原 `--job-id`，只修改封面路径并加 `--operation replace-cover`；程序会复用原任务空间，不重新上传视频。标题、正文、tags、视频或其他字段发生变化时不得冒充封面替换。
+
+   同一个多平台 Job 只恢复或重开部分平台时，必须沿用原 `--job-id` 并加 `--no-cleanup-stale-spaces`，防止清理影响未选平台的待发布页面；命令若报告关闭了当前 Job 的未选平台空间，不得宣称页面仍可见，必须恢复对应平台。
+
    平台参数省略时使用配置中的默认平台。仅在用户确认当前视频原创权利后追加 `--confirm-original-rights`。
 6. 读取命令最后输出的结构化摘要：
-   - `ready: true`：所有所选平台已验证，向用户报告并保留草稿页面；
+   - `ready: true`：所有所选平台已验证。草稿页留着，你检查后自己点发布；
    - `ready: false`：逐个平台报告 `blocker`、`missing` 和 `evidencePath`，不要笼统宣称失败或成功；
    - `USER_CONTROL`：立即停止全部浏览器工作，只有用户明确要求继续后才能重试；
    - `INPUT_CHANNEL_BROKEN`：保留现有任务，Ego Lite 恢复后原样重跑同一命令；
    - 其他 blocker 只处理对应平台，不回退或重做已经 `READY` 的平台。
 
-同一个内容包的中断恢复仍使用同一生产命令。程序负责复用任务状态、平台空间和已验证回执。
+同一个内容包的中断恢复仍使用同一生产命令和 `--job-id`。程序负责复用任务状态、平台空间和已验证回执。
 
 只读检查使用：
 
@@ -64,7 +70,7 @@ scripts/run-safe-platforms.sh <package.json> [task-suffix] [platform...] --inspe
 - 创建或修复内容包 JSON：`references/content-package.md`
 - 上传用户已有封面：`references/cover-workflow.md`
 - 查看命令参数、任务状态或单平台诊断入口：`references/scripts.md`
-- 诊断或修改页面适配器：先读 `references/platform-common.md`、`references/ego-browser-workflow.md`，再读对应的 `references/platform-*.md`
+- 诊断或修改页面适配器：先读 `references/platform-common.md`、`references/ego-browser-workflow.md`，再按平台读取 `references/platform-xiaohongshu.md`、`references/platform-douyin.md`、`references/platform-bilibili.md`、`references/platform-wechat-channels.md` 或 `references/platform-youtube.md`
 - 自定义发布步骤：先读 `references/customizing-workflows.md`，再按其中路由读取共享和平台文档
 - 更新实测范围或发布维护结论：`references/acceptance-history.md`
 

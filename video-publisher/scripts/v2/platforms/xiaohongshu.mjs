@@ -44,12 +44,17 @@ async function inspectXiaohongshu() {
       || [...document.querySelectorAll('.custom-switch-switch, .d-switch, [role="switch"]')]
         .find(el => /原创声明/.test(el.parentElement?.parentElement?.innerText || ''))
     const simulator = originalSwitch?.querySelector?.('.d-switch-simulator') || originalSwitch?.parentElement?.querySelector?.('.d-switch-simulator')
+    const originalInput = originalSwitch?.matches?.('input[type="checkbox"]')
+      ? originalSwitch
+      : originalSwitch?.querySelector?.('input[type="checkbox"]') || simulator?.querySelector?.('input[type="checkbox"]')
+    const switchTokens = String(originalSwitch?.className || '').split(/\s+/).filter(Boolean)
+    const simulatorTokens = String(simulator?.className || '').split(/\s+/).filter(Boolean)
     const originalEnabled = Boolean(originalSwitch && (
-      originalSwitch.checked === true
+      originalInput?.checked === true
       || originalSwitch.getAttribute?.('aria-checked') === 'true'
       || originalSwitch.getAttribute?.('data-state') === 'checked'
-      || /checked|active|open|enabled/.test(String(originalSwitch.className || ''))
-      || /checked|active|open|enabled/.test(String(simulator?.className || ''))
+      || switchTokens.some(token => ['checked', 'active', 'open', 'enabled'].includes(token))
+      || simulatorTokens.some(token => ['checked', 'active', 'open', 'enabled'].includes(token))
     ))
     const activeDialogs = [...document.querySelectorAll('.d-modal-mask, [role="dialog"], [class*="modal-mask"]')]
       .map(el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return { text: compact(el.innerText || el.textContent || ''), cls: String(el.className || ''), width: r.width, height: r.height, opacity: s.opacity, display: s.display, visibility: s.visibility } })
@@ -294,26 +299,57 @@ async function ensureXhsOriginal() {
     const label=labels[0]||null;const ancestors=[];for(let el=label;el&&ancestors.length<8;el=el.parentElement)ancestors.push(el)
     const selectors='.custom-switch-switch, .d-switch, [role="switch"], input[type="checkbox"]'
     const row=ancestors.find(el=>el.matches?.(selectors)||el.querySelector?.(selectors))||ancestors.find(el=>{const s=getComputedStyle(el);return compact(el.innerText||el.textContent||'')==='原创声明'&&(parseFloat(s.borderRadius)>0||s.backgroundColor!=='rgba(0, 0, 0, 0)')})||label?.parentElement
-    const target=(row?.matches?.(selectors)?row:row?.querySelector(selectors))||row
+    const target=row?.querySelector?.('.d-switch-simulator')||(row?.matches?.('.d-switch-simulator')?row:null)||(row?.matches?.(selectors)?row:row?.querySelector(selectors))||row
     if (!target) return { ok: false, reason: 'xiaohongshu original switch missing' }
     target.id='vp2-xhs-original-control';target.scrollIntoView({block:'center',inline:'center'});return {ok:true,selector:'#vp2-xhs-original-control',className:String(target.className||''),tag:target.tagName,role:target.getAttribute?.('role')||''}
   })()`);
   if (!control.ok) return control;
-  await click(control.selector,{label:'enable xhs original declaration'}).catch(()=>{});
+  try { await click(control.selector,{label:'enable xhs original declaration'}); }
+  catch (error) { return { ok: false, reason: `xiaohongshu original switch click failed: ${String(error?.message || error)}`, control }; }
   await wait(1.5);
-  const modalResult = await js(String.raw`(() => {
+  const agreement = await js(String.raw`(() => {
     const modal = [...document.querySelectorAll('.d-modal')].find(el => /笔记完成原创声明后|原创声明须知/.test(el.innerText || el.textContent || ''))
-    if (!modal) return { ok: true, modal: false }
-    const checkbox = modal.querySelector('.d-checkbox, input[type="checkbox"]')
+    if (!modal) return { ok: true, modal: false, alreadyClosed: true }
     const input = modal.querySelector('input[type="checkbox"]')
-    if (input && !input.checked) (checkbox || input).click()
-    const button = [...modal.querySelectorAll('button')].find(el => String(el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim() === '声明原创')
-    if (!button || button.disabled) return { ok: false, reason: 'xiaohongshu original confirm disabled' }
-    button.click(); return { ok: true, modal: true }
+    if (!input) return { ok: false, reason: 'xiaohongshu original agreement checkbox missing' }
+    if (input.checked) return { ok: true, modal: true, alreadyChecked: true }
+    const checkbox = modal.querySelector('.d-checkbox-simulator') || input.closest('.d-checkbox') || input
+    checkbox.id='vp2-xhs-original-agreement';checkbox.scrollIntoView({block:'center',inline:'center'})
+    return { ok: true, modal: true, selector: '#vp2-xhs-original-agreement' }
   })()`);
+  if (!agreement.ok) return { ...agreement, control };
+  if (agreement.selector) {
+    try { await click(agreement.selector, { label: 'accept xhs original declaration agreement' }); }
+    catch (error) { return { ok: false, reason: `xiaohongshu original agreement click failed: ${String(error?.message || error)}`, control, agreement }; }
+    await wait(.75);
+  }
+  let modalResult = { ok: true, modal: agreement.modal === true, alreadyClosed: agreement.alreadyClosed === true };
+  if (agreement.modal) {
+    let confirm = { ok: false, reason: 'xiaohongshu original confirm disabled' };
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      confirm = await js(String.raw`(() => {
+        const compact = value => String(value || '').replace(/\s+/g, ' ').trim()
+        const modal = [...document.querySelectorAll('.d-modal')].find(el => /笔记完成原创声明后|原创声明须知/.test(el.innerText || el.textContent || ''))
+        if (!modal) return { ok: true, alreadyClosed: true }
+        const input = modal.querySelector('input[type="checkbox"]')
+        const button = [...modal.querySelectorAll('button')].find(el => compact(el.innerText || el.textContent || '') === '声明原创')
+        if (!input?.checked || !button || button.disabled) return { ok: false, waiting: true, agreementChecked: Boolean(input?.checked), buttonDisabled: Boolean(button?.disabled) }
+        button.id='vp2-xhs-original-confirm';button.scrollIntoView({block:'center',inline:'center'})
+        return { ok: true, selector: '#vp2-xhs-original-confirm' }
+      })()`);
+      if (confirm.ok) break;
+      await wait(.25);
+    }
+    if (!confirm.ok) return { ok: false, reason: 'xiaohongshu original confirm disabled', control, agreement, confirm };
+    if (confirm.selector) {
+      try { await click(confirm.selector, { label: 'confirm xhs original declaration' }); }
+      catch (error) { return { ok: false, reason: `xiaohongshu original confirm click failed: ${String(error?.message || error)}`, control, agreement, confirm }; }
+    }
+    modalResult = { ok: true, modal: true, confirm };
+  }
   await wait(2);
-  await removeExactStaleMask(/笔记完成原创声明后|原创声明须知|声明原创/);
   inspected = await inspectXiaohongshu();
+  if (!inspected.gates.noBlockingDialog.ok) return { ok: false, reason: 'xiaohongshu original declaration dialog did not close', control, agreement, modalResult, evidence: inspected.gates.noBlockingDialog.evidence };
   return inspected.gates.original.ok ? { ok: true, control, modalResult } : { ok: false, reason: 'xiaohongshu original declaration did not persist', control, modalResult };
 }
 
@@ -321,23 +357,96 @@ async function uploadXhsCover() {
   if (!xhsCustomCover) return { ok: true, skipped: true };
   const before = await js(String.raw`(() => { const el=document.querySelector('.cover-plugin-preview .default.row, .cover-plugin-preview .default.column'); return el ? getComputedStyle(el).backgroundImage : '' })()`);
   let tab = { ok: false, reason: 'xiaohongshu upload-cover tab did not become visible' };
-  for (let attempt = 0; attempt < 2 && !tab.ok; attempt += 1) {
+  for (let attempt = 0; attempt < 4 && !tab.ok; attempt += 1) {
     await removeExactStaleMask(/设置封面/);
-    try {
-      await click('.cover-plugin-preview .default.row, .cover-plugin-preview .default.column', { label: 'open xhs cover editor' });
-    } catch (error) {
-      tab = { ok: false, reason: `xiaohongshu cover preview click failed: ${String(error?.message || error)}` };
+    const existingEditor = await js(String.raw`(() => {
+      const compact=value=>String(value||'').replace(/\s+/g,' ').trim()
+      const visible=el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>10&&r.height>10&&s.display!=='none'&&s.visibility!=='hidden'}
+      const modal=[...document.querySelectorAll('.main-cover-editor-modal,.d-modal,[role="dialog"]')]
+        .find(el=>(el.matches('.main-cover-editor-modal')||/设置封面/.test(compact(el.innerText||el.textContent||'')))&&visible(el))
+      const scope=modal||document
+      const input=[...scope.querySelectorAll('input[type=file]')].find(el=>/image|png|jpe?g/i.test(el.accept||''))
+      const uploaded=[...scope.querySelectorAll('.uploaded-thumbnail-img')].find(el=>el.naturalWidth>0&&el.naturalHeight>0&&visible(el))
+      return uploaded
+        ? {ok:true,alreadyUploaded:true,width:uploaded.naturalWidth,height:uploaded.naturalHeight}
+        : {ok:!!input}
+    })()`);
+    if (existingEditor.ok) {
+      tab = { ok: true, attempt: attempt + 1, mode: existingEditor.alreadyUploaded ? 'resume-uploaded-thumbnail' : 'direct-image-input', alreadyUploaded: existingEditor.alreadyUploaded === true };
+      break;
+    }
+    const opener = await js(String.raw`((attempt) => {
+      const compact=value=>String(value||'').replace(/\s+/g,' ').trim()
+      const visible=el=>{if(!el)return false;const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>10&&r.height>10&&s.display!=='none'&&s.visibility!=='hidden'}
+      const exact=[...document.querySelectorAll('button,[role="button"],div,span')]
+        .filter(el=>compact(el.innerText||el.textContent||'')==='编辑封面'&&visible(el))
+        .sort((a,b)=>{const ab=a.matches('button,[role="button"]')?0:1,bb=b.matches('button,[role="button"]')?0:1;if(ab!==bb)return ab-b;const ar=a.getBoundingClientRect(),br=b.getBoundingClientRect();return ar.width*ar.height-br.width*br.height})
+      const currentEntry=[...document.querySelectorAll('.cover-edit-entry')].find(visible)
+      const currentStack=[...document.querySelectorAll('.cover-edit-stack')].find(visible)
+      const currentOperator=[...document.querySelectorAll('.operator.default')].find(visible)
+      const preview=document.querySelector('.cover-plugin-preview .default.row, .cover-plugin-preview .default.column')
+      const targets=[currentEntry,currentStack,currentOperator,preview].filter(Boolean)
+      const target=targets[attempt]||exact[0]||preview
+      if(!target)return {ok:false,reason:'xiaohongshu cover editor opener missing'}
+      target.scrollIntoView({block:'center',inline:'center'})
+      if(target.matches('.cover-edit-entry')){target.click();return {ok:true,nativeHoverEntry:true,text:compact(target.innerText||target.textContent||'')}}
+      document.querySelectorAll('#vp2-xhs-cover-opener').forEach(el=>el.removeAttribute('id'))
+      target.id='vp2-xhs-cover-opener';return {ok:true,selector:'#vp2-xhs-cover-opener',text:compact(target.innerText||target.textContent||'')}
+    })(${JSON.stringify(attempt)})`);
+    if (!opener.ok) {
+      tab = opener;
       continue;
+    }
+    if (!opener.nativeHoverEntry) {
+      try {
+        await click(opener.selector, { label: 'open xhs cover editor' });
+      } catch (error) {
+        tab = { ok: false, reason: `xiaohongshu cover preview click failed: ${String(error?.message || error)}` };
+        continue;
+      }
+    }
+    await wait(0.75);
+    const openedAfterRealClick = await js(String.raw`(() => {
+      const compact=value=>String(value||'').replace(/\s+/g,' ').trim()
+      const visible=el=>{if(!el)return false;const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>10&&r.height>10&&s.display!=='none'&&s.visibility!=='hidden'}
+      const modal=[...document.querySelectorAll('.main-cover-editor-modal,.d-modal,[role="dialog"]')]
+        .find(el=>(el.matches('.main-cover-editor-modal')||/设置封面/.test(compact(el.innerText||el.textContent||'')))&&visible(el))
+      const input=[...(modal?.querySelectorAll('input[type=file]')||[])].find(el=>/image|png|jpe?g/i.test(el.accept||''))
+      return Boolean(modal||input)
+    })()`);
+    if (!openedAfterRealClick) {
+      await js(String.raw`(() => {
+        const target=document.querySelector('.cover-plugin-preview .cover-edit-entry')||document.querySelector('#vp2-xhs-cover-opener')
+        if(!target)return {ok:false,reason:'xiaohongshu cover opener disappeared before native fallback'}
+        target.click();return {ok:true}
+      })()`);
     }
     for (let index = 0; index < 20; index += 1) {
       const exposed = await js(String.raw`(() => {
         const compact=value=>String(value||'').replace(/\s+/g,' ').trim()
-        const item=[...document.querySelectorAll('.d-tabs-header')]
-          .find(el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return compact(el.innerText||el.textContent||'')==='上传封面'&&r.width>10&&r.height>10&&s.display!=='none'&&s.visibility!=='hidden'})
-        if(!item)return {ok:false}
+        const visible=el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>10&&r.height>10&&s.display!=='none'&&s.visibility!=='hidden'}
+        const modal=[...document.querySelectorAll('.main-cover-editor-modal,.d-modal,[role="dialog"]')]
+          .find(el=>(el.matches('.main-cover-editor-modal')||/设置封面/.test(compact(el.innerText||el.textContent||'')))&&visible(el))
+        const scope=modal||document
+        const uploaded=[...scope.querySelectorAll('.uploaded-thumbnail-img')].find(el=>el.naturalWidth>0&&el.naturalHeight>0&&visible(el))
+        if(uploaded)return {ok:true,alreadyUploaded:true}
+        const input=[...scope.querySelectorAll('input[type=file]')].find(el=>/image|png|jpe?g/i.test(el.accept||''))
+        if(input)return {ok:true,directInput:true}
+        const item=[...scope.querySelectorAll('.d-tabs-header,[role="tab"],button,div,span')]
+          .filter(el=>{const label=compact(el.innerText||el.textContent||'');return (/^(上传封面|上传)$/.test(label)||/^(上传图片|本地上传|从本地上传)$/.test(label))&&visible(el)})
+          .sort((a,b)=>{const ap=a.matches('.d-tabs-header,[role="tab"],button')?0:1,bp=b.matches('.d-tabs-header,[role="tab"],button')?0:1;if(ap!==bp)return ap-bp;const ar=a.getBoundingClientRect(),br=b.getBoundingClientRect();return ar.width*ar.height-br.width*br.height})[0]
+        if(!item)return {ok:false,directInput:false}
         item.id='vp2-xhs-upload-cover-tab';item.scrollIntoView({block:'center',inline:'center'});return {ok:true,selector:'#vp2-xhs-upload-cover-tab'}
       })()`);
       if (exposed.ok) {
+        if (exposed.alreadyUploaded) {
+          tab = { ok: true, attempt: attempt + 1, waited: index * 0.5, mode: 'resume-uploaded-thumbnail', alreadyUploaded: true };
+          break;
+        }
+        if (exposed.directInput) {
+          tab = { ok: true, attempt: attempt + 1, waited: index * 0.5, mode: 'direct-image-input' };
+          break;
+        }
         try {
           await click(exposed.selector, { label: 'activate xhs upload-cover tab' });
           tab = { ok: true, attempt: attempt + 1, waited: index * 0.5 };
@@ -349,26 +458,84 @@ async function uploadXhsCover() {
       await wait(0.5);
     }
   }
-  if (!tab.ok) return tab;
-  await wait(1);
-  const exposed = await js(String.raw`(() => {
-    const input=[...document.querySelectorAll('input[type=file]')].find(el=>/image|png|jpe?g/i.test(el.accept||''))
-    if(!input)return {ok:false,reason:'xiaohongshu cover input missing'}
-    input.id='vp2-xhs-cover'; return {ok:true,selector:'#vp2-xhs-cover',accept:input.accept||''}
-  })()`);
-  if (!exposed.ok) return exposed;
-  try { await uploadFile(exposed.selector, xhsCoverPath); } catch (error) { return { ok: false, reason: String(error?.message || error) }; }
-  await wait(2);
-  const ratio = await js(String.raw`(() => {
+  if (!tab.ok) {
+    const diagnostics = await js(String.raw`(() => {
+      const compact=value=>String(value||'').replace(/\s+/g,' ').trim()
+      const visible=el=>{if(!el)return false;const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>4&&r.height>4&&s.display!=='none'&&s.visibility!=='hidden'}
+      const candidates=[...document.querySelectorAll('button,[role="button"],[role="tab"],div,span')]
+        .filter(el=>visible(el)&&/封面|上传|本地|图片/.test(compact(el.innerText||el.textContent||'')))
+        .map(el=>({tag:el.tagName,role:el.getAttribute?.('role')||'',className:String(el.className||'').slice(0,180),text:compact(el.innerText||el.textContent||'').slice(0,180)}))
+        .filter((item,index,array)=>array.findIndex(other=>other.tag===item.tag&&other.role===item.role&&other.className===item.className&&other.text===item.text)===index)
+        .slice(0,80)
+      const dialogs=[...document.querySelectorAll('.main-cover-editor-modal,.d-modal,[role="dialog"],[class*="modal"],[class*="drawer"]')]
+        .filter(visible)
+        .map(el=>({tag:el.tagName,role:el.getAttribute?.('role')||'',className:String(el.className||'').slice(0,180),text:compact(el.innerText||el.textContent||'').slice(0,600)}))
+        .slice(0,20)
+      const inputs=[...document.querySelectorAll('input[type=file]')].map(el=>({accept:el.accept||'',className:String(el.className||''),outerHTML:String(el.outerHTML||'').slice(0,500)}))
+      return {candidates,dialogs,inputs}
+    })()`);
+    return { ...tab, diagnostics };
+  }
+  if (!tab.alreadyUploaded) {
+    await wait(1);
+    const exposed = await js(String.raw`(() => {
+      const input=[...document.querySelectorAll('input[type=file]')].find(el=>/image|png|jpe?g/i.test(el.accept||''))
+      if(!input)return {ok:false,reason:'xiaohongshu cover input missing'}
+      input.id='vp2-xhs-cover'; return {ok:true,selector:'#vp2-xhs-cover',accept:input.accept||''}
+    })()`);
+    if (!exposed.ok) return exposed;
+    try { await uploadFile(exposed.selector, xhsCoverPath); } catch (error) { return { ok: false, reason: String(error?.message || error) }; }
+    await wait(2);
+  }
+  let ratio = await js(String.raw`(() => {
     const item=[...document.querySelectorAll('.crop-ratio-item')].find(el=>String(el.innerText||el.textContent||'').replace(/\s+/g,' ').trim()==='3:4')
-    if(!item)return {ok:false,reason:'xiaohongshu 3:4 crop chip missing'}
+    if(!item)return {ok:false,reason:'legacy-ratio-control-missing'}
     item.click(); return {ok:true,className:String(item.className||'')}
   })()`);
+  if (!ratio.ok) {
+    const ratioControl = await js(String.raw`(() => {
+      const compact=value=>String(value||'').replace(/\s+/g,' ').trim()
+      const modal=[...document.querySelectorAll('.main-cover-editor-modal,.d-modal,[role="dialog"]')]
+        .find(el=>el.matches('.main-cover-editor-modal')||/设置封面/.test(compact(el.innerText||el.textContent||'')))
+      const item=modal?.querySelector('.ratio-select')
+      if(!item){
+        const uploaded=[...modal?.querySelectorAll('.uploaded-thumbnail-img')||[]].find(el=>el.naturalWidth>0&&el.naturalHeight>0)
+        const actualRatio=uploaded?uploaded.naturalWidth/uploaded.naturalHeight:0
+        if(uploaded&&Math.abs(actualRatio-0.75)<0.01)return {ok:true,already:true,inferredFromUploadedThumbnail:true,actual:'3:4',width:uploaded.naturalWidth,height:uploaded.naturalHeight}
+        return {ok:false,reason:'xiaohongshu ratio selector missing',uploadedThumbnail:uploaded?{width:uploaded.naturalWidth,height:uploaded.naturalHeight}:null}
+      }
+      if(String(item.innerText||item.textContent||'').replace(/\s+/g,' ').trim()==='3:4')return {ok:true,already:true}
+      item.id='vp2-xhs-ratio-select';return {ok:true,selector:'#vp2-xhs-ratio-select'}
+    })()`);
+    if (!ratioControl.ok) return ratioControl;
+    if (!ratioControl.already) {
+      try { await click(ratioControl.selector, { label: 'open xhs cover ratio selector' }); } catch (error) { return { ok: false, reason: `xiaohongshu ratio selector click failed: ${String(error?.message || error)}` }; }
+      await wait(0.5);
+      const ratioItem = await js(String.raw`(() => {
+        const item=[...document.querySelectorAll('.ratio-select-menu .ratio-item')].find(el=>String(el.innerText||el.textContent||'').replace(/\s+/g,' ').trim()==='3:4')
+        if(!item)return {ok:false,reason:'xiaohongshu 3:4 ratio option missing'}
+        item.id='vp2-xhs-ratio-3x4';return {ok:true,selector:'#vp2-xhs-ratio-3x4'}
+      })()`);
+      if (!ratioItem.ok) return ratioItem;
+      try { await click(ratioItem.selector, { label: 'select xhs 3:4 cover ratio' }); } catch (error) { return { ok: false, reason: `xiaohongshu 3:4 ratio click failed: ${String(error?.message || error)}` }; }
+      await wait(0.5);
+    }
+    ratio = ratioControl.inferredFromUploadedThumbnail
+      ? ratioControl
+      : await js(String.raw`(() => {
+        const modal=[...document.querySelectorAll('.main-cover-editor-modal,.d-modal,[role="dialog"]')].find(el=>el.matches('.main-cover-editor-modal')||/设置封面/.test(el.innerText||el.textContent||''))
+        const actual=String(modal?.querySelector('.ratio-select')?.innerText||modal?.querySelector('.ratio-select')?.textContent||'').replace(/\s+/g,' ').trim()
+        return actual==='3:4'?{ok:true,actual}:{ok:false,reason:'xiaohongshu 3:4 ratio did not persist',actual}
+      })()`);
+  }
   if (!ratio.ok) return ratio;
   await wait(1);
   const confirmed = await js(String.raw`(() => {
-    const modal=[...document.querySelectorAll('.d-modal')].find(el=>/设置封面/.test(el.innerText||el.textContent||''))
-    const button=[...(modal?.querySelectorAll('button')||[])].find(el=>String(el.innerText||el.textContent||'').replace(/\s+/g,' ').trim()==='确定'&&!el.disabled)
+    const compact=value=>String(value||'').replace(/\s+/g,' ').trim()
+    const visible=el=>{if(!el)return false;const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>10&&r.height>10&&s.display!=='none'&&s.visibility!=='hidden'}
+    const modal=[...document.querySelectorAll('.main-cover-editor-modal,.d-modal,[role="dialog"]')]
+      .find(el=>(el.matches('.main-cover-editor-modal')||/设置封面/.test(compact(el.innerText||el.textContent||'')))&&visible(el))
+    const button=[...(modal?.querySelectorAll('button')||[])].find(el=>/^(确定|完成)$/.test(compact(el.innerText||el.textContent||''))&&!el.disabled&&visible(el))
     if(!button)return {ok:false,reason:'xiaohongshu cover confirm missing or disabled'}
     button.click(); return {ok:true}
   })()`);

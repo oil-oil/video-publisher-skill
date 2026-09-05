@@ -3,7 +3,8 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "把 /Users/example/Movies/agent-demo-subtitled.mp4 准备到我已经配置好的小红书、抖音和 B站草稿里。标题和标签先根据字幕帮我拟一版，我确认后再上传；这条视频是我原创的。",
+      "name": "首次多平台草稿准备",
+      "prompt": "把 /tmp/video-publisher-eval/agent-demo-subtitled.mp4 准备到我已经配置好的小红书、抖音和 B站草稿里。标题和标签先根据字幕帮我拟一版，我确认后再上传；这条视频是我原创的。",
       "expected_output": "检查配置和精确视频，按需读取 intake 与内容包文档，先确认文案和平台，再只调用生产入口，最终报告每个平台 READY 或结构化 blocker，绝不点击最终发布。",
       "files": [],
       "expectations": [
@@ -15,7 +16,8 @@
     },
     {
       "id": 2,
-      "prompt": "第一次用这个发布工具。我只有抖音和 YouTube，平时两个都发；视频放在 /Users/example/Movies，YouTube 默认不公开。帮我配好，以后视频逐条确认原创。",
+      "name": "首次账号配置",
+      "prompt": "第一次用这个发布工具。我只有抖音和 YouTube，平时两个都发；视频放在 /tmp/video-publisher-eval/Movies，YouTube 默认不公开。帮我配好，以后视频逐条确认原创。",
       "expected_output": "检测到 onboarding 后只读取配置文档，按平台条件补齐必要信息，复述确认后用 config.mjs onboard 写入并 validate，不打开创作者页面。",
       "files": [],
       "expectations": [
@@ -27,6 +29,7 @@
     },
     {
       "id": 3,
+      "name": "中断任务恢复",
       "prompt": "刚才多平台上传到一半 Ego Lite 崩了，现在已经重新打开。继续刚才那个任务，不要重复上传已经完成的平台。",
       "expected_output": "保留原任务并原样重跑同一生产命令，让编排器恢复状态和回执；不手动清状态、不创建第二套页面控制，也不重做已 READY 平台。",
       "files": [],
@@ -39,6 +42,7 @@
     },
     {
       "id": 4,
+      "name": "幂等适配器定制",
       "prompt": "修改 video-publisher：在抖音话题填写完成后确保允许下载开关是开启的，第二次运行不能重复点击。",
       "expected_output": "识别为适配器定制，读取 customizing、共享浏览器规范和抖音文档，按 inspect-action-verify 实现幂等步骤，并保留最终发布、原创、任务空间和共享安全边界。",
       "files": [],
@@ -47,6 +51,58 @@
         "步骤先读状态，目标状态已存在时不点击",
         "动作后独立验证开关状态",
         "不绕过最终发布守卫、用户控制或任务空间所有权"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "ready-rerun-guard",
+      "prompt": "刚才这个 Job 已经 READY 了，我又说了一次继续发布。请按默认方式处理。",
+      "expected_output": "识别为潜在重复草稿，默认拒绝浏览器工作；说明可选择只读检查、替换封面或明确重发，不自行创建第二份草稿。",
+      "files": [],
+      "expectations": [
+        "READY Job 默认不重新打开新任务空间",
+        "不重新上传视频或重做 READY 平台",
+        "给出 inspect、replace-cover 和显式 repost 三种清楚选项",
+        "重发必须要求 --confirm-new-copy"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "replace-ready-cover",
+      "prompt": "把 job-id 为 demo-ready-job 的小红书草稿封面替换成 /tmp/video-publisher-eval/new-cover-3x4.png，其他内容完全不变。",
+      "expected_output": "读取封面流程，基于原内容包另建只改封面路径的内容包，沿用原 job-id 并执行 replace-cover；复用原任务空间，只执行检查、封面修复和独立验证，不重新上传视频。",
+      "files": [],
+      "expectations": [
+        "要求原 Job 为 READY 且封面上传授权为 true",
+        "视频和非封面字段必须与原任务一致",
+        "使用 --operation replace-cover 和原 --job-id",
+        "运行阶段不得出现 upload_start、prefill 或 upload"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "明确重发新副本",
+      "prompt": "这条已经 READY，但我确认要再发一份新的草稿。",
+      "expected_output": "把请求识别为显式重发，使用新的 Job 身份和 --operation repost --confirm-new-copy，不覆盖或复用原 READY Job。",
+      "files": [],
+      "expectations": [
+        "要求用户意图明确为新副本",
+        "使用新 Job 而不是原 READY Job",
+        "带 --confirm-new-copy",
+        "仍停在最终发布按钮前"
+      ]
+    },
+    {
+      "id": 8,
+      "name": "已发布内容修改边界",
+      "prompt": "把我已经发布的小红书视频换个封面，直接帮我改好。",
+      "expected_output": "区分线上已发布内容和 READY 草稿；先定位具体内容并说明保存会修改线上状态，在用户明确授权具体保存动作前不点击保存，也不把草稿 replace-cover 当作线上修改成功。",
+      "files": [],
+      "expectations": [
+        "不把 READY 草稿替换流程用于已发布内容",
+        "要求可验证的具体内容身份",
+        "保存线上修改前取得明确授权",
+        "无保存证据时不宣称替换成功"
       ]
     }
   ]

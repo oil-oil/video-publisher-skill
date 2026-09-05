@@ -10,9 +10,18 @@ const DIR = path.dirname(fileURLToPath(import.meta.url));
 const V2_DIR = path.dirname(DIR);
 process.env.VIDEO_PUBLISHER_V2_LOCK_ROOT = path.join(os.tmpdir(), `video-publisher-publisher-test-locks-${process.pid}`);
 
+function closeNamesFromLog(script) {
+  const match = [...String(script).matchAll(/const closeNames = new Set\((\[.*?\])\)/gs)].at(-1);
+  return match ? JSON.parse(match[1]) : [];
+}
+
 function run(command, args, options) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { ...options, stdio: ["ignore", "pipe", "pipe"] });
+    const env = { ...process.env, ...(options?.env || {}) };
+    if (!options?.env?.VIDEO_PUBLISHER_V2_EGO_COMMAND) {
+      env.VIDEO_PUBLISHER_V2_EGO_COMMAND = path.join(DIR, "mock-ego-cleanup.mjs");
+    }
+    const child = spawn(command, args, { ...options, env, stdio: ["ignore", "pipe", "pipe"] });
     let stdout="",stderr="";
     child.stdout.on("data",chunk=>{stdout+=chunk}); child.stderr.on("data",chunk=>{stderr+=chunk});
     child.on("error",reject); child.on("close",code=>resolve({code,stdout,stderr}));
@@ -32,6 +41,16 @@ function mp4WithDuration(durationSeconds, timescale = 1000) {
   payload.writeUInt32BE(timescale, 12);
   payload.writeUInt32BE(Math.round(durationSeconds * timescale), 16);
   return Buffer.concat([box("ftyp", Buffer.alloc(4)), box("moov", box("mvhd", payload))]);
+}
+
+function pngHeader(width, height, marker = 0) {
+  const buffer = Buffer.alloc(25);
+  buffer[0] = 0x89;
+  buffer.write("PNG", 1, "ascii");
+  buffer.writeUInt32BE(width, 16);
+  buffer.writeUInt32BE(height, 20);
+  buffer[24] = marker;
+  return buffer;
 }
 
 test("publisher prefills Douyin metadata before waiting for upload completion", async () => {
@@ -140,6 +159,28 @@ test("publisher uses upload-time prefill for Xiaohongshu, Bilibili, and WeChat C
     const uploadStart=events.find(item=>item.platform===platform&&item.phase==="upload"&&item.event==="start").at;
     assert.ok(prefillEnd<=uploadStart,{platform,prefillEnd,uploadStart});
   }
+});
+
+test("publisher defers a retryable prefill failure until upload completion", async () => {
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-prefill-defer-test-"));
+  const log=path.join(root,"events.ndjson");
+  const videoPath=path.join(root,"sample-video.mp4");
+  const packagePath=path.join(root,"package.json");
+  const configPath=path.join(root,"config.json");
+  await fs.promises.writeFile(videoPath,mp4WithDuration(30));
+  await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:2,onboarding:{completed:true},sourceDirectory:root,availablePlatforms:["bilibili"],defaultPlatforms:["bilibili"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:1,uploadConcurrency:1}}));
+  await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Deferred prefill",bilibiliDescription:"Deferred prefill",bilibiliTags:["Test"],cover:{uploadCustomCover:false}}));
+  const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"prefill-defer","bilibili","--state-root",root],{env:{
+    ...process.env,
+    VIDEO_PUBLISHER_CONFIG:configPath,
+    VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),
+    VIDEO_PUBLISHER_V2_MOCK_LOG:log,
+    VIDEO_PUBLISHER_V2_MOCK_BLOCKERS:JSON.stringify({"bilibili:prefill":{code:"PLATFORM_REJECTED_METADATA",message:"tag not stable yet",retryable:true,requiresUser:false}}),
+  }});
+  assert.equal(result.code,0,`${result.stderr}\n${result.stdout}`);
+  assert.match(result.stderr,/prefill deferred until upload completion/);
+  const phases=(await fs.promises.readFile(log,"utf8")).trim().split(/\n/).map(line=>JSON.parse(line)).filter(item=>item.event==="start").map(item=>item.phase);
+  assert.deepEqual(phases,["inspect","upload_start","prefill","upload","mutate","verify"]);
 });
 
 test("publisher advances a successful platform before a slow blocked upload exits", async () => {
@@ -414,6 +455,8 @@ test("publisher invalidates receipts and checkpoints when Ego recreates a task s
   await fs.promises.writeFile(statePath,JSON.stringify(state,null,2));
   const checkpointPath=path.join(root,jobId,"checkpoints","xiaohongshu.receipts.json");
   await fs.promises.writeFile(checkpointPath,JSON.stringify({schemaVersion:2,platform:"xiaohongshu",fingerprint:state.fingerprint,taskSpaceId:11,receipts:{legacyOnly:{stale:true}}}));
+  state.status="running";
+  await fs.promises.writeFile(statePath,JSON.stringify(state,null,2));
   const second=await run(process.execPath,args,{env:{...baseEnv,VIDEO_PUBLISHER_V2_MOCK_TASK_SPACE_ID:"99"}});
   assert.equal(second.code,0,`${second.stderr}\n${second.stdout}`);
   const recovered=JSON.parse(await fs.promises.readFile(statePath,"utf8"));
@@ -424,6 +467,7 @@ test("publisher invalidates receipts and checkpoints when Ego recreates a task s
   assert.equal(fs.existsSync(checkpointPath),false);
 
   recovered.platforms.xiaohongshu.receipts.legacyOnly={stale:true};
+  recovered.status="running";
   await fs.promises.writeFile(statePath,JSON.stringify(recovered,null,2));
   await fs.promises.writeFile(checkpointPath,JSON.stringify({schemaVersion:2,platform:"xiaohongshu",fingerprint:recovered.fingerprint,taskSpaceId:99,receipts:{legacyOnly:{stale:true}}}));
   const recycled=await run(process.execPath,args,{env:{...baseEnv,VIDEO_PUBLISHER_V2_MOCK_TASK_SPACE_ID:"99",VIDEO_PUBLISHER_V2_MOCK_TASK_SPACE_RECREATED:"1"}});
@@ -434,7 +478,7 @@ test("publisher invalidates receipts and checkpoints when Ego recreates a task s
   assert.equal(fs.existsSync(checkpointPath),false);
 });
 
-test("publisher preserves the recorded task-space name when a retry changes its display suffix", async () => {
+test("publisher refuses an implicit duplicate after READY", async () => {
   const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-task-name-test-"));
   const videoPath=path.join(root,"sample-video.mp4");
   const packagePath=path.join(root,"package.json");
@@ -451,13 +495,263 @@ test("publisher preserves the recorded task-space name when a retry changes its 
   const statePath=path.join(root,jobId,"state.json");
   const firstState=JSON.parse(await fs.promises.readFile(statePath,"utf8"));
   const recordedName=firstState.platforms.xiaohongshu.taskSpaceName;
+  assert.match(recordedName, new RegExp(`^video publisher v2 xiaohongshu original-suffix-${jobId}-[a-z0-9]+-[a-z0-9]+$`));
+  const second=await run(process.execPath,[...base,"changed-suffix",...tail],{env});
+  assert.equal(second.code,2);
+  assert.match(second.stderr,/already READY/);
+  const unchanged=JSON.parse(await fs.promises.readFile(statePath,"utf8"));
+  assert.equal(unchanged.platforms.xiaohongshu.taskSpaceName,recordedName);
+  assert.equal((unchanged.retiredSpaces || []).some(item=>item.name===recordedName),false);
+});
+
+test("replace-cover reuses the READY draft and never uploads video again", async () => {
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-replace-cover-test-"));
+  const videoPath=path.join(root,"sample-video.mp4");
+  const firstCover=path.join(root,"cover-one.png");
+  const secondCover=path.join(root,"cover-two.png");
+  const firstPackage=path.join(root,"package-one.json");
+  const secondPackage=path.join(root,"package-two.json");
+  const configPath=path.join(root,"config.json");
+  const firstLog=path.join(root,"first.ndjson");
+  const replaceLog=path.join(root,"replace.ndjson");
+  const jobId="replace-cover-job";
+  await fs.promises.writeFile(videoPath,mp4WithDuration(30));
+  await fs.promises.writeFile(firstCover,pngHeader(1080,1440,1));
+  await fs.promises.writeFile(secondCover,pngHeader(1080,1440,2));
+  await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:2,onboarding:{completed:true},sourceDirectory:root,availablePlatforms:["xiaohongshu"],defaultPlatforms:["xiaohongshu"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:1,uploadConcurrency:1}}));
+  const shared={videoPath,title:"Replace cover",xhsTopics:["Test"]};
+  await fs.promises.writeFile(firstPackage,JSON.stringify({...shared,cover:{uploadCustomCover:true,vertical3x4Path:firstCover}}));
+  await fs.promises.writeFile(secondPackage,JSON.stringify({...shared,cover:{uploadCustomCover:true,vertical3x4Path:secondCover}}));
+  const env={...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs")};
+  const first=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),firstPackage,"replace-cover","xiaohongshu","--job-id",jobId,"--state-root",root],{env:{...env,VIDEO_PUBLISHER_V2_MOCK_LOG:firstLog}});
+  assert.equal(first.code,0,`${first.stderr}\n${first.stdout}`);
+  const before=JSON.parse(await fs.promises.readFile(path.join(root,jobId,"state.json"),"utf8"));
+  const beforeSpace=before.platforms.xiaohongshu.taskSpaceId;
+  const beforeFingerprint=before.fingerprint;
+  before.platforms.xiaohongshu.videoReceipt={fingerprint:beforeFingerprint,taskSpaceId:beforeSpace,mode:"injected",observedAt:new Date().toISOString()};
+  await fs.promises.writeFile(path.join(root,jobId,"state.json"),JSON.stringify(before,null,2));
+  const replaced=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),secondPackage,"replace-cover","xiaohongshu","--job-id",jobId,"--state-root",root,"--operation","replace-cover"],{env:{...env,VIDEO_PUBLISHER_V2_MOCK_LOG:replaceLog,VIDEO_PUBLISHER_V2_MOCK_EXISTING_READY:"1"}});
+  assert.equal(replaced.code,0,`${replaced.stderr}\n${replaced.stdout}`);
+  const events=(await fs.promises.readFile(replaceLog,"utf8")).trim().split(/\n/).map(line=>JSON.parse(line));
+  assert.deepEqual(events.filter(item=>item.event==="start").map(item=>item.phase),["inspect","mutate","verify"]);
+  const after=JSON.parse(await fs.promises.readFile(path.join(root,jobId,"state.json"),"utf8"));
+  assert.equal(after.platforms.xiaohongshu.taskSpaceId,beforeSpace);
+  assert.notEqual(after.fingerprint,beforeFingerprint);
+  assert.equal(after.video.sha256,before.video.sha256);
+  assert.equal(after.platforms.xiaohongshu.videoReceipt.fingerprint,after.fingerprint);
+  assert.equal(after.platforms.xiaohongshu.receipts.cover.mock,true);
+  assert.equal(after.status,"ready");
+});
+
+test("replace-cover rejects metadata changes before browser work", async () => {
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-replace-cover-identity-test-"));
+  const videoPath=path.join(root,"sample-video.mp4");
+  const firstCover=path.join(root,"cover-one.png");
+  const secondCover=path.join(root,"cover-two.png");
+  const firstPackage=path.join(root,"package-one.json");
+  const secondPackage=path.join(root,"package-two.json");
+  const configPath=path.join(root,"config.json");
+  const log=path.join(root,"replace.ndjson");
+  const jobId="replace-cover-identity-job";
+  await fs.promises.writeFile(videoPath,mp4WithDuration(30));
+  await fs.promises.writeFile(firstCover,pngHeader(1080,1440,1));
+  await fs.promises.writeFile(secondCover,pngHeader(1080,1440,2));
+  await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:2,onboarding:{completed:true},sourceDirectory:root,availablePlatforms:["xiaohongshu"],defaultPlatforms:["xiaohongshu"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:1,uploadConcurrency:1}}));
+  await fs.promises.writeFile(firstPackage,JSON.stringify({videoPath,title:"Original title",xhsTopics:["Test"],cover:{uploadCustomCover:true,vertical3x4Path:firstCover}}));
+  await fs.promises.writeFile(secondPackage,JSON.stringify({videoPath,title:"Changed title",xhsTopics:["Test"],cover:{uploadCustomCover:true,vertical3x4Path:secondCover}}));
+  const env={...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs")};
+  const first=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),firstPackage,"replace-cover","xiaohongshu","--job-id",jobId,"--state-root",root],{env});
+  assert.equal(first.code,0,`${first.stderr}\n${first.stdout}`);
+  const rejected=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),secondPackage,"replace-cover","xiaohongshu","--job-id",jobId,"--state-root",root,"--replace-cover"],{env:{...env,VIDEO_PUBLISHER_V2_MOCK_LOG:log}});
+  assert.equal(rejected.code,2);
+  assert.match(rejected.stderr,/may change only cover/);
+  assert.equal(fs.existsSync(log),false);
+});
+
+test("publisher recovers a missing space name from last evidence when reusing a space", async () => {
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-reuse-space-test-"));
+  const videoPath=path.join(root,"sample-video.mp4");
+  const packagePath=path.join(root,"package.json");
+  const configPath=path.join(root,"config.json");
+  const jobId="reuse-task-name-job";
+  await fs.promises.writeFile(videoPath,"test video fixture");
+  await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:1,onboarding:{completed:true},sourceDirectory:root,defaultPlatforms:["xiaohongshu"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:1,uploadConcurrency:1}}));
+  await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Reuse task name",xhsTopics:["Test"],cover:{uploadCustomCover:false}}));
+  const base=[path.join(V2_DIR,"publisher.mjs"),packagePath];
+  const tail=["xiaohongshu","--job-id",jobId,"--state-root",root,"--reuse-space"];
+  const env={...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs")};
+  const first=await run(process.execPath,[...base,"original-suffix",...tail],{env});
+  assert.equal(first.code,0,`${first.stderr}\n${first.stdout}`);
+  const statePath=path.join(root,jobId,"state.json");
+  const firstState=JSON.parse(await fs.promises.readFile(statePath,"utf8"));
+  const recordedName=firstState.platforms.xiaohongshu.taskSpaceName;
   assert.equal(recordedName,`video publisher v2 xiaohongshu original-suffix-${jobId}`);
   delete firstState.platforms.xiaohongshu.taskSpaceName;
+  firstState.status = "blocked";
   await fs.promises.writeFile(statePath,JSON.stringify(firstState,null,2));
   const second=await run(process.execPath,[...base,"changed-suffix",...tail],{env});
   assert.equal(second.code,0,`${second.stderr}\n${second.stdout}`);
   const recovered=JSON.parse(await fs.promises.readFile(statePath,"utf8"));
   assert.equal(recovered.platforms.xiaohongshu.taskSpaceName,recordedName,"legacy state should recover the stable name from its last evidence");
+});
+
+test("publisher keeps the recorded space when resuming an in-progress job", async () => {
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-resume-space-test-"));
+  const videoPath=path.join(root,"sample-video.mp4");
+  const packagePath=path.join(root,"package.json");
+  const configPath=path.join(root,"config.json");
+  const jobId="resume-space-job";
+  await fs.promises.writeFile(videoPath,"test video fixture");
+  await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:1,onboarding:{completed:true},sourceDirectory:root,defaultPlatforms:["xiaohongshu"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:1,uploadConcurrency:1}}));
+  await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Resume space",xhsTopics:["Test"],cover:{uploadCustomCover:false}}));
+  const args=[path.join(V2_DIR,"publisher.mjs"),packagePath,"resume-suffix","xiaohongshu","--job-id",jobId,"--state-root",root];
+  const env={...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs")};
+  const first=await run(process.execPath,args,{env});
+  assert.equal(first.code,0,`${first.stderr}\n${first.stdout}`);
+  const statePath=path.join(root,jobId,"state.json");
+  const firstState=JSON.parse(await fs.promises.readFile(statePath,"utf8"));
+  const recordedName=firstState.platforms.xiaohongshu.taskSpaceName;
+  firstState.status = "running";
+  await fs.promises.writeFile(statePath,JSON.stringify(firstState,null,2));
+  const second=await run(process.execPath,args,{env});
+  assert.equal(second.code,0,`${second.stderr}\n${second.stdout}`);
+  const resumed=JSON.parse(await fs.promises.readFile(statePath,"utf8"));
+  assert.equal(resumed.platforms.xiaohongshu.taskSpaceName, recordedName);
+});
+
+test("default READY run leaves the current draft space open", async () => {
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-default-keep-"));
+  const videoPath=path.join(root,"sample-video.mp4");
+  const packagePath=path.join(root,"package.json");
+  const configPath=path.join(root,"config.json");
+  const jobId="default-keep-job";
+  const log=path.join(root,"cleanup.log");
+  await fs.promises.writeFile(videoPath,"test video fixture");
+  await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:1,onboarding:{completed:true},sourceDirectory:root,defaultPlatforms:["xiaohongshu"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:1,uploadConcurrency:1}}));
+  await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Default keep",xhsTopics:["Test"],cover:{uploadCustomCover:false}}));
+  const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"default-keep","xiaohongshu","--job-id",jobId,"--state-root",root],{env:{
+    ...process.env,
+    VIDEO_PUBLISHER_CONFIG:configPath,
+    VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),
+    VIDEO_PUBLISHER_V2_CLEANUP_LOG:log,
+  }});
+  assert.equal(result.code,0,`${result.stderr}\n${result.stdout}`);
+  const state=JSON.parse(await fs.promises.readFile(path.join(root,jobId,"state.json"),"utf8"));
+  assert.equal(state.keepSpace,true);
+  const name=state.platforms.xiaohongshu.taskSpaceName;
+  assert.ok(name);
+  if (fs.existsSync(log)) {
+    assert.equal(closeNamesFromLog(await fs.promises.readFile(log,"utf8")).includes(name), false);
+  }
+});
+
+test("inspect-only on an in-progress job keeps the recorded space and status", async () => {
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-inspect-running-"));
+  const videoPath=path.join(root,"sample-video.mp4");
+  const packagePath=path.join(root,"package.json");
+  const configPath=path.join(root,"config.json");
+  const jobId="inspect-running-job";
+  const log=path.join(root,"cleanup.log");
+  await fs.promises.writeFile(videoPath,"test video fixture");
+  await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:1,onboarding:{completed:true},sourceDirectory:root,defaultPlatforms:["xiaohongshu"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:1,uploadConcurrency:1}}));
+  await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Inspect running",xhsTopics:["Test"],cover:{uploadCustomCover:false}}));
+  const env={...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),VIDEO_PUBLISHER_V2_CLEANUP_LOG:log};
+  const first=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"inspect-run","xiaohongshu","--job-id",jobId,"--state-root",root,"--keep-space"],{env});
+  assert.equal(first.code,0,`${first.stderr}\n${first.stdout}`);
+  const statePath=path.join(root,jobId,"state.json");
+  const firstState=JSON.parse(await fs.promises.readFile(statePath,"utf8"));
+  const recordedName=firstState.platforms.xiaohongshu.taskSpaceName;
+  firstState.status="running";
+  await fs.promises.writeFile(statePath,JSON.stringify(firstState,null,2));
+  const inspected=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"inspect-run","xiaohongshu","--job-id",jobId,"--state-root",root,"--inspect-only"],{env});
+  assert.equal(inspected.code,0,`${inspected.stderr}\n${inspected.stdout}`);
+  const after=JSON.parse(await fs.promises.readFile(statePath,"utf8"));
+  assert.equal(after.status,"running");
+  assert.equal(after.platforms.xiaohongshu.taskSpaceName,recordedName);
+  const script=await fs.promises.readFile(log,"utf8");
+  assert.equal(closeNamesFromLog(script).includes(recordedName), false);
+});
+
+test("keep-space survives a later job stale sweep", async () => {
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-keep-space-"));
+  const configPath=path.join(root,"config.json");
+  const log=path.join(root,"cleanup.log");
+  await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:1,onboarding:{completed:true},sourceDirectory:root,defaultPlatforms:["xiaohongshu"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:1,uploadConcurrency:1}}));
+  const env={...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),VIDEO_PUBLISHER_V2_CLEANUP_LOG:log};
+  async function writePackage(name) {
+    const videoPath=path.join(root,`${name}.mp4`);
+    const packagePath=path.join(root,`${name}.json`);
+    await fs.promises.writeFile(videoPath,`video ${name}`);
+    await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:name,xhsTopics:["Test"],cover:{uploadCustomCover:false}}));
+    return packagePath;
+  }
+  const firstPkg=await writePackage("keep-a");
+  const secondPkg=await writePackage("keep-b");
+  const first=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),firstPkg,"keep-a","xiaohongshu","--job-id","job-a","--state-root",root,"--keep-space"],{env});
+  assert.equal(first.code,0,`${first.stderr}\n${first.stdout}`);
+  const kept=JSON.parse(await fs.promises.readFile(path.join(root,"job-a","state.json"),"utf8"));
+  assert.equal(kept.keepSpace,true);
+  const keptName=kept.platforms.xiaohongshu.taskSpaceName;
+  const second=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),secondPkg,"keep-b","xiaohongshu","--job-id","job-b","--state-root",root],{env});
+  assert.equal(second.code,0,`${second.stderr}\n${second.stdout}`);
+  const script=await fs.promises.readFile(log,"utf8");
+  assert.equal(closeNamesFromLog(script).includes(keptName), false);
+  assert.equal(JSON.parse(await fs.promises.readFile(path.join(root,"job-a","state.json"),"utf8")).keepSpace,true);
+});
+
+test("cleanup-only --package does not close a running job space", async () => {
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-cleanup-running-"));
+  const videoPath=path.join(root,"sample-video.mp4");
+  const packagePath=path.join(root,"package.json");
+  const configPath=path.join(root,"config.json");
+  const jobId="cleanup-running-job";
+  const log=path.join(root,"cleanup.log");
+  await fs.promises.writeFile(videoPath,"test video fixture");
+  await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:1,onboarding:{completed:true},sourceDirectory:root,defaultPlatforms:["xiaohongshu"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:1,uploadConcurrency:1}}));
+  await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Cleanup running",xhsTopics:["Test"],cover:{uploadCustomCover:false}}));
+  const env={...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),VIDEO_PUBLISHER_V2_CLEANUP_LOG:log};
+  const first=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"cleanup-run","xiaohongshu","--job-id",jobId,"--state-root",root,"--keep-space"],{env});
+  assert.equal(first.code,0,`${first.stderr}\n${first.stdout}`);
+  const statePath=path.join(root,jobId,"state.json");
+  const firstState=JSON.parse(await fs.promises.readFile(statePath,"utf8"));
+  const recordedName=firstState.platforms.xiaohongshu.taskSpaceName;
+  firstState.status="running";
+  await fs.promises.writeFile(statePath,JSON.stringify(firstState,null,2));
+  const cleaned=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),"--cleanup-only","--package",packagePath,"--job-id",jobId,"--state-root",root],{env});
+  assert.equal(cleaned.code,0,`${cleaned.stderr}\n${cleaned.stdout}`);
+  const after=JSON.parse(await fs.promises.readFile(statePath,"utf8"));
+  assert.equal(after.status,"running");
+  assert.equal(after.platforms.xiaohongshu.taskSpaceName,recordedName);
+  const script=await fs.promises.readFile(log,"utf8");
+  assert.equal(closeNamesFromLog(script).includes(recordedName), false);
+});
+
+test("cleanup-only asks Ego to close completed leftover spaces", async () => {
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-cleanup-only-test-"));
+  const other=path.join(root,"ready-job");
+  const log=path.join(root,"cleanup.log");
+  await fs.promises.mkdir(other, { recursive: true });
+  await fs.promises.writeFile(path.join(other,"state.json"), JSON.stringify({
+    status: "ready",
+    platforms: { douyin: { taskSpaceId: 21, taskSpaceName: "old douyin leftover" } },
+  }));
+  const result=await run(process.execPath,[
+    path.join(V2_DIR,"publisher.mjs"),
+    "--cleanup-only",
+    "--state-root", root,
+    "--no-cleanup-stale-spaces",
+  ], { env: { ...process.env, VIDEO_PUBLISHER_V2_CLEANUP_LOG: log } });
+  // --no-cleanup-stale-spaces with no package has nothing to close; rerun with default stale cleanup
+  const cleaned=await run(process.execPath,[
+    path.join(V2_DIR,"publisher.mjs"),
+    "--cleanup-only",
+    "--state-root", root,
+  ], { env: { ...process.env, VIDEO_PUBLISHER_V2_CLEANUP_LOG: log } });
+  assert.equal(result.code, 0, `${result.stderr}\n${result.stdout}`);
+  assert.equal(cleaned.code, 0, `${cleaned.stderr}\n${cleaned.stdout}`);
+  const script = await fs.promises.readFile(log, "utf8");
+  assert.match(script, /old douyin leftover/);
+  assert.match(script, /oil-collect-publish/);
 });
 
 test("two publishers for the same job produce one winner and one immediate refusal", async () => {

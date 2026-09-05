@@ -19,6 +19,8 @@ test("主入口保持精简并保留发布安全边界", () => {
   assert.match(skill, /scripts\/run-safe-platforms\.sh <package\.json>/);
   assert.match(skill, /不点击任何平台的最终发布、保存或定时发布按钮/);
   assert.match(skill, /--confirm-original-rights/);
+  assert.match(skill, /--no-cleanup-stale-spaces/);
+  assert.match(skill, /部分平台/);
   assert.match(skill, /USER_CONTROL/);
   assert.match(skill, /INPUT_CHANNEL_BROKEN/);
   assert.doesNotMatch(skill, /orchestrator\.lock|state\.corrupt|Current Acceptance Boundary|2026-/);

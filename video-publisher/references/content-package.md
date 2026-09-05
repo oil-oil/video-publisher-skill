@@ -10,6 +10,8 @@
 
 `videoPath` 必须是本地绝对路径，`title` 必须存在。JSON 中的 `\n` 编码在解析后必须成为真实换行，不能把反斜杠和字母 `n` 当作正文保存。
 
+oil 默认只写标题和 tags。不要为小红书、抖音、B 站或视频号另写介绍正文。平台校验若要求 description，填标题，或标题加一行 tags。
+
 ## 五平台基础示例
 
 ```json
@@ -101,6 +103,7 @@ youtubeNotifySubscribers：boolean，默认 true
 cover.vertical3x4Path：小红书；抖音和视频号的竖版槽
 cover.horizontal4x3Path：抖音和视频号的横版槽；B站首页主封面
 cover.horizontal16x9Path：YouTube 缩略图；可选 B站个人空间伴随图
+cover.platforms.<平台>：可选平台专用路径覆盖；只替换一个平台封面时优先使用
 ```
 
 启用后所选平台必须提供完整映射：
@@ -111,6 +114,22 @@ cover.horizontal16x9Path：YouTube 缩略图；可选 B站个人空间伴随图
 B站：4:3
 视频号：3:4 + 4:3
 YouTube：16:9
+```
+
+多平台 Job 只替换一个平台时，保留共享路径，再增加平台覆盖，避免同一比例的兄弟平台一起变更身份：
+
+```json
+{
+  "cover": {
+    "uploadCustomCover": true,
+    "horizontal4x3Path": "/absolute/path/shared-4x3.png",
+    "platforms": {
+      "bilibili": {
+        "horizontal4x3Path": "/absolute/path/new-bilibili-4x3.png"
+      }
+    }
+  }
+}
 ```
 
 详细回执流程见 `cover-workflow.md`。

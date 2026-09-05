@@ -1,6 +1,6 @@
 # WeChat Channels Adapter Contract
 
-Read `platform-common.md` and `ego-browser-workflow.md` first.
+Before changing the WeChat Channels adapter, read `platform-common.md` and `ego-browser-workflow.md`.
 
 ## Contents
 
@@ -89,6 +89,8 @@ When enabled, upload both user-provided assets. Use the same flow first for the 
 7. On the share-card path, handle the intermediate `使用此素材` confirmation before the parent `确认` control.
 8. Keep the lifecycle active until the editor closes and the corresponding main-card CDN URL changes.
 9. Persist each URL with its absolute asset path and ratio, then require a separate verify process to find both again.
+
+The slot-specific titles `编辑个人主页卡片` and `编辑分享卡片` remain preferred. A current page variant can instead expose the same active editor as `编辑封面`; accept that fallback only when the unique visible dialog also contains `上传封面`, `取消`, and `确认`. Recovery, image-input lookup, and confirmation must search visible `.weui-desktop-dialog__wrp` roots directly instead of depending on the removed `.edit-cover-dialog` ancestor.
 
 Only `.vertical-cover-wrap img.vertical-img-size` and `.horizon-cover-wrap img.horizon-img-size` are receipt targets. Require separate `3:4` and `4:3` receipts.
 

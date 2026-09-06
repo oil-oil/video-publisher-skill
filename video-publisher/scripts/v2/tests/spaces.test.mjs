@@ -12,6 +12,7 @@ import {
   selectSpacesToClose,
   shouldCloseCurrentSpaces,
   shouldRotateSpaces,
+  spaceCleanupScript,
   spaceShouldClose,
 } from "../lib/spaces.mjs";
 
@@ -54,15 +55,13 @@ test("space cleanup never closes user-owned or live current spaces", () => {
     { id: 5, name: "oil-collect-other", ownership: "agent" },
   ];
   const selected = selectSpacesToClose(listed, {
-    closeIds: new Set([2]),
-    closeNames: new Set(["oil-collect-publish"]),
+    closeNames: new Set(["video publisher v2 douyin ready-old", "oil-collect-publish"]),
     keepIds: new Set([1]),
     keepNames: new Set(["video publisher v2 xiaohongshu live"]),
     prefixes: [],
   });
   assert.deepEqual(selected.map(item => item.id), [2, 3]);
   assert.equal(spaceShouldClose(listed[4], {
-    closeIds: new Set(),
     closeNames: new Set(),
     keepIds: new Set(),
     keepNames: new Set(),
@@ -98,7 +97,6 @@ test("buildCleanupPlan closes the current job after ready and only explicit left
     stateRoot: root,
   }, state, { complete: true, userControl: false });
   assert.ok(plan);
-  assert.deepEqual([...plan.closeIds].sort((left, right) => left - right), [9, 10, 11]);
   assert.ok(plan.closeNames.includes("current xhs"));
   assert.ok(plan.closeNames.includes("old douyin"));
   assert.ok(plan.closeNames.includes("previous xhs"));
@@ -111,6 +109,31 @@ test("buildCleanupPlan closes the current job after ready and only explicit left
     names: ["old douyin"],
   });
   assert.equal(listed.names.includes("live xhs"), false);
+});
+
+test("cleanup cannot close another draft after a retired numeric ID is recycled", async () => {
+  const plan = buildCleanupPlan({
+    platforms: ["xiaohongshu"], keepSpace: true, cleanupStaleSpaces: false,
+  }, {
+    jobId: "current-job",
+    platforms: { xiaohongshu: { taskSpaceId: 11, taskSpaceName: "current draft" } },
+    retiredSpaces: [{ id: 7, name: "retired draft" }],
+  }, { complete: true, userControl: false });
+  const listed = [
+    { id: 7, name: "another job's draft", ownership: "agent" },
+    { id: 19, name: "retired draft", ownership: "agent" },
+    { id: 11, name: "current draft", ownership: "agent" },
+  ];
+  const policy = { ...plan, ...Object.fromEntries(
+    ["closeNames", "keepIds", "keepNames"].map(key => [key, new Set(plan[key] || [])]),
+  ) };
+  assert.deepEqual(selectSpacesToClose(listed, policy).map(item => item.id), [19]);
+  const closed = [];
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  await new AsyncFunction("listTaskSpaces", "completeTaskSpace", "console", spaceCleanupScript(plan))(
+    async () => listed, async id => closed.push(id), { log() {} },
+  );
+  assert.deepEqual(closed, [19], "实际清理脚本也必须按名称核对，不能只看旧 ID");
 });
 
 test("subset cleanup protects every current space in the same job", () => {
@@ -145,7 +168,6 @@ test("subset cleanup protects every current space in the same job", () => {
     "current wechat",
     "current xhs",
   ]);
-  assert.deepEqual(plan.closeIds, [7]);
   assert.deepEqual(plan.closeNames, ["old wechat"]);
   assert.deepEqual(selectSpacesToClose([
     { id: 9, name: "current xhs", ownership: "agent" },
@@ -154,7 +176,6 @@ test("subset cleanup protects every current space in the same job", () => {
     { id: 11, name: "current wechat", ownership: "agent" },
     { id: 7, name: "old wechat", ownership: "agent" },
   ], {
-    closeIds: new Set(plan.closeIds),
     closeNames: new Set(plan.closeNames),
     keepIds: new Set(plan.keepIds),
     keepNames: new Set(plan.keepNames),
@@ -177,7 +198,6 @@ test("closing a selected subset still protects unselected current spaces", () =>
     retiredSpaces: [{ id: 9, name: "current xhs" }],
   }, { complete: true, userControl: false });
 
-  assert.deepEqual(plan.closeIds, [11]);
   assert.deepEqual(plan.closeNames, ["current wechat"]);
   assert.deepEqual(plan.keepIds, [9]);
   assert.deepEqual(plan.keepNames, ["current xhs"]);

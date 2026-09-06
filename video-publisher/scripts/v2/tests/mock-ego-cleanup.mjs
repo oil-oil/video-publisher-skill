@@ -9,13 +9,10 @@ process.stdin.on("end", () => {
   if (logPath) {
     fs.appendFileSync(logPath, `${stdin}\n---\n`);
   }
-  const closeIds = [...stdin.matchAll(/const closeIds = new Set\((\[.*?\])\)/s)].at(-1);
   const closeNames = [...stdin.matchAll(/const closeNames = new Set\((\[.*?\])\)/s)].at(-1);
   const closed = [];
   try {
-    const ids = closeIds ? JSON.parse(closeIds[1]) : [];
     const names = closeNames ? JSON.parse(closeNames[1]) : [];
-    for (const id of ids) closed.push({ id, name: "" });
     for (const name of names) closed.push({ id: null, name });
   } catch {
     // keep empty closed list if the cleanup script shape changes

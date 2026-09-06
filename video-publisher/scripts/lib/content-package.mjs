@@ -87,12 +87,21 @@ export function coverUploadEnabled(cover = {}) {
   return cover.uploadCustomCover === true;
 }
 
-export function coverAssetsForPlatform(pkg, platform) {
+export function coverForPlatform(pkg, platform) {
   const cover = pkg.cover || {};
   const override = cover.platforms?.[platform] || {};
-  const verticalPath = String(override.vertical3x4Path || cover.vertical3x4Path || "").trim();
-  const horizontalPath = String(override.horizontal4x3Path || cover.horizontal4x3Path || "").trim();
-  const widescreenPath = String(override.horizontal16x9Path || cover.horizontal16x9Path || "").trim();
+  return {
+    ...cover,
+    ...Object.fromEntries(["vertical3x4Path", "horizontal4x3Path", "horizontal16x9Path"]
+      .map(key => [key, String(override[key] || cover[key] || "").trim()])),
+  };
+}
+
+export function coverAssetsForPlatform(pkg, platform) {
+  const cover = coverForPlatform(pkg, platform);
+  const verticalPath = cover.vertical3x4Path;
+  const horizontalPath = cover.horizontal4x3Path;
+  const widescreenPath = cover.horizontal16x9Path;
   const mapping = {
     xiaohongshu: verticalPath ? [{ slot: "portrait", ratio: "3:4", path: verticalPath }] : [],
     wechat_channels: [
@@ -214,7 +223,7 @@ export function validateCommonPackage(pkg) {
 
 export function validateCoverPackage(pkg, platform) {
   const errors = [];
-  const cover = pkg.cover || {};
+  const cover = coverForPlatform(pkg, platform);
   if (!coverUploadEnabled(cover)) return errors;
   if (
     platform === "bilibili"

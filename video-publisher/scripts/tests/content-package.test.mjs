@@ -182,6 +182,28 @@ test("Bilibili rejects a 16:9 image in the 4:3 primary cover field", async () =>
   });
 });
 
+test("Bilibili accepts its own 4:3 cover when only a shared 16:9 cover exists", async () => {
+  await withTempDir(async root => {
+    const bilibiliPath = path.join(root, "bilibili-4x3.png");
+    const sharedPath = path.join(root, "shared-16x9.png");
+    const packagePath = path.join(root, "package.json");
+    await fs.promises.writeFile(bilibiliPath, pngHeader(1440, 1080));
+    await fs.promises.writeFile(sharedPath, pngHeader(1280, 720));
+    await fs.promises.writeFile(packagePath, JSON.stringify({
+      title: "独立封面",
+      bilibiliDescription: "说明",
+      bilibiliTags: ["测试"],
+      cover: {
+        uploadCustomCover: true,
+        horizontal16x9Path: sharedPath,
+        platforms: { bilibili: { horizontal4x3Path: bilibiliPath } },
+      },
+    }));
+    const pkg = readPackage(packagePath, { config: defaultConfig() });
+    assert.deepEqual(validateBilibiliPackage(pkg), []);
+  });
+});
+
 test("account defaults fill only fields omitted from the package", async () => {
   await withTempDir(async root => {
     const packagePath = path.join(root, "package.json");

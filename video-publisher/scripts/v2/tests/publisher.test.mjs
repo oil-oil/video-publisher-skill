@@ -53,6 +53,45 @@ function pngHeader(width, height, marker = 0) {
   return buffer;
 }
 
+test("resuming one platform keeps unfinished siblings resumable", async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "video-publisher-subset-resume-"));
+  try {
+    const videoPath = path.join(root, "video.mp4");
+    const packagePath = path.join(root, "package.json");
+    const configPath = path.join(root, "config.json");
+    const statePath = path.join(root, "subset-job", "state.json");
+    await fs.promises.writeFile(videoPath, mp4WithDuration(30));
+    await fs.promises.writeFile(packagePath, JSON.stringify({ videoPath, title: "子集恢复", tags: ["测试"] }));
+    await fs.promises.writeFile(configPath, JSON.stringify({
+      schemaVersion: 2, onboarding: { completed: true }, sourceDirectory: root,
+      availablePlatforms: ["xiaohongshu", "douyin"], defaultPlatforms: ["xiaohongshu", "douyin"],
+      declarations: { originalityPolicy: "all_videos_original" },
+    }));
+    const env = {
+      ...process.env, VIDEO_PUBLISHER_CONFIG: configPath,
+      VIDEO_PUBLISHER_V2_RUNNER: path.join(DIR, "mock-runner.mjs"),
+    };
+    const base = [path.join(V2_DIR, "publisher.mjs"), "--package", packagePath,
+      "--job-id", "subset-job", "--state-root", root, "--no-cleanup-stale-spaces"];
+    const blocker = { code: "AUTH_REQUIRED", requiresUser: true };
+    const first = await run(process.execPath, [...base, "--platforms", "xiaohongshu,douyin"], {
+      env: { ...env, VIDEO_PUBLISHER_V2_MOCK_BLOCKERS: JSON.stringify({ "xiaohongshu:inspect": blocker, "douyin:inspect": blocker }) },
+    });
+    assert.equal(first.code, 10, first.stderr);
+    const second = await run(process.execPath, [...base, "--platform", "xiaohongshu", "--operation", "resume"], { env });
+    assert.equal(second.code, 0, second.stderr);
+    const partial = JSON.parse(await fs.promises.readFile(statePath, "utf8"));
+    assert.equal(partial.platforms.xiaohongshu.verdict.ready, true);
+    assert.equal(partial.platforms.douyin.verdict.ready, false);
+    assert.equal(partial.status, "blocked", "单平台完成不能将整个 Job 标为 READY");
+    const third = await run(process.execPath, [...base, "--platform", "douyin", "--operation", "resume"], { env });
+    assert.equal(third.code, 0, third.stderr);
+    assert.equal(JSON.parse(await fs.promises.readFile(statePath, "utf8")).status, "ready");
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("publisher prefills Douyin metadata before waiting for upload completion", async () => {
   const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-douyin-prefill-test-"));
   const log=path.join(root,"events.ndjson");
@@ -279,18 +318,20 @@ test("publisher keeps explicit user control as a global stop", async () => {
 test("publisher circuit-breaks all UI mutation after an upload loses Ego", async () => {
   const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-channel-break-test-"));
   const log=path.join(root,"events.ndjson");
+  const cleanupLog=path.join(root,"cleanup.log");
   const videoPath=path.join(root,"sample-video.mp4");
   const packagePath=path.join(root,"package.json");
   const configPath=path.join(root,"config.json");
   await fs.promises.writeFile(videoPath,mp4WithDuration(30));
   await fs.promises.writeFile(configPath,JSON.stringify({schemaVersion:1,onboarding:{completed:true},sourceDirectory:root,defaultPlatforms:["xiaohongshu","douyin"],declarations:{originalityPolicy:"all_videos_original"},execution:{checkConcurrency:2,uploadConcurrency:2}}));
   await fs.promises.writeFile(packagePath,JSON.stringify({videoPath,title:"Circuit breaker",xhsTopics:["Test"],douyinTopics:["Test"],cover:{uploadCustomCover:false}}));
-  const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"channel-break","xiaohongshu","douyin","--state-root",root],{env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),VIDEO_PUBLISHER_V2_MOCK_LOG:log,VIDEO_PUBLISHER_V2_MOCK_BROKEN_CHANNEL:"douyin:upload",VIDEO_PUBLISHER_V2_MOCK_DELAYS:JSON.stringify({"douyin:upload_start":1,"douyin:prefill":1,"douyin:upload":1,"xiaohongshu:upload":150})}});
+  const result=await run(process.execPath,[path.join(V2_DIR,"publisher.mjs"),packagePath,"channel-break","xiaohongshu","douyin","--state-root",root],{env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_RUNNER:path.join(DIR,"mock-runner.mjs"),VIDEO_PUBLISHER_V2_MOCK_LOG:log,VIDEO_PUBLISHER_V2_CLEANUP_LOG:cleanupLog,VIDEO_PUBLISHER_V2_MOCK_BROKEN_CHANNEL:"douyin:upload",VIDEO_PUBLISHER_V2_MOCK_DELAYS:JSON.stringify({"douyin:upload_start":1,"douyin:prefill":1,"douyin:upload":1,"xiaohongshu:upload":150})}});
   assert.equal(result.code,0,`${result.stderr}\n${result.stdout}`);
   assert.match(result.stderr,/input channel broken; final verify parallel=2/);
   const events=(await fs.promises.readFile(log,"utf8")).trim().split(/\n/).map(line=>JSON.parse(line));
   assert.equal(events.some(item=>item.phase==="mutate"),false,"a sibling that is not yet eligible must not start mutation after a shared Ego channel failure");
   assert.equal(events.filter(item=>item.phase==="verify"&&item.event==="start").length,2,"read-only final verification still records page truth");
+  assert.equal(fs.existsSync(cleanupLog),false,"共享输入通道失败后不能继续关闭浏览器空间");
 });
 
 test("publisher stops the serial UI queue when a mutator loses Ego", async () => {

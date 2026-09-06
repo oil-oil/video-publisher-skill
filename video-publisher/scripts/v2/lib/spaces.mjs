@@ -107,7 +107,8 @@ export function spaceShouldClose(space, policy) {
   const id = space?.id;
   if (space?.ownership === "user") return false;
   if (policy.keepIds.has(id) || policy.keepNames.has(name)) return false;
-  if (policy.closeIds.has(id) || policy.closeNames.has(name)) return true;
+  // Ego 会复用数字 ID；关闭操作必须匹配记录的名称。
+  if (policy.closeNames.has(name)) return true;
   return (policy.prefixes || []).some(prefix => prefix && (name === prefix || name.startsWith(prefix)));
 }
 
@@ -131,9 +132,8 @@ export function runEgoScript(script, command = process.env.VIDEO_PUBLISHER_V2_EG
   });
 }
 
-export function spaceCleanupScript({ closeIds, closeNames, keepIds, keepNames, prefixes }) {
+export function spaceCleanupScript({ closeNames, keepIds, keepNames, prefixes }) {
   return `
-const closeIds = new Set(${JSON.stringify(closeIds)});
 const closeNames = new Set(${JSON.stringify(closeNames)});
 const keepIds = new Set(${JSON.stringify(keepIds)});
 const keepNames = new Set(${JSON.stringify(keepNames)});
@@ -146,7 +146,7 @@ for (const space of spaces || []) {
   if (space.ownership === "user") continue;
   if (keepIds.has(id) || keepNames.has(name)) continue;
   const stale = prefixes.some(prefix => prefix && (name === prefix || name.startsWith(prefix)));
-  const explicit = closeIds.has(id) || closeNames.has(name);
+  const explicit = closeNames.has(name);
   if (!stale && !explicit) continue;
   try {
     await completeTaskSpace(id, { keep: false });
@@ -159,8 +159,8 @@ console.log("VIDEO_PUBLISHER_SPACE_CLEANUP:" + JSON.stringify({ closed }));
 `;
 }
 
-export function buildCleanupPlan(args, state, { complete, userControl, incomingInProgress = false }) {
-  if (userControl) return null;
+export function buildCleanupPlan(args, state, { complete, userControl, inputChannelBroken = false, incomingInProgress = false }) {
+  if (userControl || inputChannelBroken) return null;
   const selectedPlatforms = (args.platforms && args.platforms.length)
     ? args.platforms
     : Object.keys(state.platforms || {});
@@ -175,13 +175,7 @@ export function buildCleanupPlan(args, state, { complete, userControl, incomingI
   const selectedNames = new Set(selectedCurrent.names);
   const keepIds = uniqueIds(allCurrent.ids.filter(id => !closeCurrent || !selectedIds.has(id)));
   const keepNames = uniqueNames(allCurrent.names.filter(name => !closeCurrent || !selectedNames.has(name)));
-  const protectedIds = new Set(keepIds);
   const protectedNames = new Set(keepNames);
-  const closeIds = uniqueIds([
-    ...(closeCurrent ? selectedCurrent.ids : []),
-    ...retired.ids,
-    ...stale.ids,
-  ]).filter(id => !protectedIds.has(id));
   const closeNames = uniqueNames([
     ...(closeCurrent ? selectedCurrent.names : []),
     ...retired.names,
@@ -189,9 +183,8 @@ export function buildCleanupPlan(args, state, { complete, userControl, incomingI
     ...(args.cleanupStaleSpaces ? (args.cleanupNames || [LEGACY_COLLECT_SPACE]) : []),
   ]).filter(name => !protectedNames.has(name));
   const prefixes = args.cleanupStaleSpaces ? uniqueNames(args.cleanupPrefixes || []) : [];
-  if (!closeIds.length && !closeNames.length && !prefixes.length) return null;
+  if (!closeNames.length && !prefixes.length) return null;
   return {
-    closeIds,
     closeNames,
     keepIds,
     keepNames,

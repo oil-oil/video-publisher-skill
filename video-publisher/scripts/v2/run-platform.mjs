@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
+  coverForPlatform,
   readPackage,
   validateBilibiliPackage,
   validateDouyinPackage,
@@ -112,7 +113,7 @@ const header = [
   `const taskName = ${JSON.stringify(process.env.VIDEO_PUBLISHER_V2_TASK_NAME || `video publisher v2 ${platform} ${taskSuffix}`)};`,
   `const taskSpaceRef = ${JSON.stringify(taskSpaceRef)};`,
   `const packagePath = ${JSON.stringify(packagePath)};`,
-  `const pkg = ${JSON.stringify(pkg)};`,
+  `const pkg = ${JSON.stringify({ ...pkg, cover: coverForPlatform(pkg, platform) })};`,
   `const videoPath = ${JSON.stringify(path.resolve(pkg.videoPath))};`,
   `const expectedReceipts = ${JSON.stringify(JSON.parse(process.env.VIDEO_PUBLISHER_V2_RECEIPTS || "{}"))};`,
   `const expectedVideoReceipt = ${JSON.stringify(JSON.parse(process.env.VIDEO_PUBLISHER_V2_VIDEO_RECEIPT || "null"))};`,

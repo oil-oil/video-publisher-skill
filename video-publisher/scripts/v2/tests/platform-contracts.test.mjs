@@ -238,7 +238,6 @@ test("YouTube corrections can clear all tags and replace a stale details receipt
   const source = fs.readFileSync(path.join(PLATFORM_DIR, "youtube.mjs"), "utf8");
   assert.match(source, /for \(const tag of youtubeTags\)/, "an empty requested list must skip additions after removing old chips");
   assert.match(source, /const detailsGatesReady = \['title', 'description', 'tags', 'audience', 'settings'\]/);
-  assert.match(source, /if \(!detailsGatesReady && before\.evidence\?\.workflowStep/);
   assert.match(source, /currentDetailsComparable/);
   assert.match(source, /expectedReceipts\.details = receipts\.details/);
 });

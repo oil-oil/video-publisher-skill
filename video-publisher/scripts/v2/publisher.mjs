@@ -452,11 +452,11 @@ async function main() {
   await runPool(runnablePlatforms, args.checkConcurrency, platform => invoke(platform, "inspect"));
   if (args.inspectOnly) {
     const hardBlocked = args.platforms.some(platform => ["blocked", "blocked_user", "blocked_foreign_draft"].includes(state.platforms[platform].status));
-    const selectedReady = args.platforms.every(platform => state.platforms[platform].verdict?.ready === true);
+    const allReady = Object.values(state.platforms).every(item => item.verdict?.ready === true);
     state.status = incomingStatus === "ready"
-      ? (selectedReady ? "ready" : "blocked")
+      ? (allReady ? "ready" : "blocked")
       : incomingInProgress ? incomingStatus : (hardBlocked ? "blocked" : "inspected");
-    const plan = await maybeCleanupSpaces(args, state, { complete: false, userControl, incomingInProgress });
+    const plan = await maybeCleanupSpaces(args, state, { complete: false, userControl, inputChannelBroken, incomingInProgress });
     await persistKeepSpace(store, state, args, plan?.closeCurrent === true);
     await store.close();
     console.log(JSON.stringify(summary(state, args.platforms, store.statePath), null, 2));
@@ -577,16 +577,17 @@ async function main() {
   }
 
   const complete = args.platforms.every(platform => state.platforms[platform].verdict?.ready === true);
-  state.status = userControl ? "paused_user" : complete ? "ready" : "blocked";
-  const plan = await maybeCleanupSpaces(args, state, { complete, userControl, incomingInProgress });
+  const allReady = Object.values(state.platforms).every(item => item.verdict?.ready === true);
+  state.status = userControl ? "paused_user" : allReady ? "ready" : "blocked";
+  const plan = await maybeCleanupSpaces(args, state, { complete, userControl, inputChannelBroken, incomingInProgress });
   await persistKeepSpace(store, state, args, plan?.closeCurrent === true);
   await store.close();
   console.log(JSON.stringify(summary(state, args.platforms, store.statePath), null, 2));
   if (!complete) process.exitCode = 10;
 }
 
-async function maybeCleanupSpaces(args, state, { complete, userControl, incomingInProgress = false }) {
-  const plan = buildCleanupPlan(args, state, { complete, userControl, incomingInProgress });
+async function maybeCleanupSpaces(args, state, { complete, userControl, inputChannelBroken = false, incomingInProgress = false }) {
+  const plan = buildCleanupPlan(args, state, { complete, userControl, inputChannelBroken, incomingInProgress });
   if (!plan) return null;
   try {
     const cleaned = await cleanupTaskSpaces(plan);

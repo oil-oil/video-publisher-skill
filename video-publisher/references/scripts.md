@@ -125,6 +125,10 @@ scripts/run-safe-platforms.sh \
 
 清理计划会保护当前 Job 中全部现用空间，即使历史 `retiredSpaces` 记录与现用空间重复也不能关闭它们。子集恢复仍必须显式关闭 stale cleanup，避免清理其他已完成 Job；任务完成后另行运行受控清理。
 
+子集命令成功只说明本次所选平台完成；整个 Job 必须全部平台就绪才能标为 `READY`，未完成平台仍可沿用原 Job 恢复。清理旧空间必须核对记录名称，不能仅凭可能被 Ego 复用的数字 ID 关闭页面。
+
+`INPUT_CHANNEL_BROKEN` 与 `USER_CONTROL` 都会停止后续空间清理；关闭页面也属于浏览器修改，不能绕过全局停止条件。
+
 UI concurrency is fixed at `1` and has no public override.
 
 State defaults to `~/.video-publisher/v2-jobs/<job-id>/`. The job stores the package fingerprint, numeric task-space ids, exact stable task-space names, task-space-bound receipts, observations, compact verdicts, an atomic one-generation `state.backup.json`, and schema-`2` receipt checkpoints under `checkpoints/`. An invalid primary state may recover only from a fingerprint-matching backup; the corrupt file is preserved as `state.corrupt-<timestamp>.json`, after which all platform gates are read again.

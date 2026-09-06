@@ -272,6 +272,7 @@ async function inspectYoutube() {
   const detailsReceiptOk = Boolean(
     detailsReceipt
       && state.videoId
+      && state.workflowStep && state.workflowStep !== 'DETAILS'
       && detailsReceipt.videoId === state.videoId
       && detailsReceipt.title === youtubeTitle
       && detailsReceipt.description === youtubeDescription
@@ -1103,7 +1104,8 @@ async function mutateYoutube() {
   const recoveryActions = {};
   const detailsGatesReady = ['title', 'description', 'tags', 'audience', 'settings']
     .every(gate => before.gates[gate]?.ok === true);
-  if (!detailsGatesReady && before.evidence?.workflowStep && before.evidence.workflowStep !== 'DETAILS') {
+  const needsThumbnail = youtubeCustomThumbnail && !before.gates.cover.ok;
+  if ((!detailsGatesReady || needsThumbnail) && before.evidence?.workflowStep && before.evidence.workflowStep !== 'DETAILS') {
     recoveryActions.returnToDetails = await returnYoutubeToDetails();
     if (!recoveryActions.returnToDetails.ok) {
       return {

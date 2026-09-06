@@ -18,6 +18,45 @@ function box(type,payload){const buffer=Buffer.alloc(8+payload.length);buffer.wr
 function mp4WithDuration(durationSeconds,timescale=1000){const payload=Buffer.alloc(20);payload.writeUInt32BE(timescale,12);payload.writeUInt32BE(Math.round(durationSeconds*timescale),16);return Buffer.concat([box("ftyp",Buffer.alloc(4)),box("moov",box("mvhd",payload))])}
 async function waitFor(predicate,timeoutMs=3000){const started=Date.now();while(Date.now()-started<timeoutMs){if(await predicate())return;await new Promise(resolve=>setTimeout(resolve,25))}throw new Error("timed out waiting for test condition")}
 
+test("platform runner sends the platform cover override to the adapter", async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "video-publisher-cover-adapter-"));
+  try {
+    const videoPath = path.join(root, "video.mp4");
+    const packagePath = path.join(root, "package.json");
+    const configPath = path.join(root, "config.json");
+    const scriptPath = path.join(root, "generated-script.mjs");
+    const fakeEgoPath = path.join(root, "fake-ego");
+    const sharedPath = path.join(root, "shared.png");
+    const overridePath = path.join(root, "override.png");
+    const png = Buffer.alloc(24);
+    png[0] = 0x89; png.write("PNG", 1, "ascii");
+    png.writeUInt32BE(1440, 16); png.writeUInt32BE(1080, 20);
+    await fs.promises.writeFile(sharedPath, png);
+    await fs.promises.writeFile(overridePath, png);
+    await fs.promises.writeFile(videoPath, mp4WithDuration(30));
+    await fs.promises.writeFile(packagePath, JSON.stringify({
+      videoPath, title: "封面覆盖", bilibiliDescription: "说明", bilibiliTags: ["测试"],
+      cover: { uploadCustomCover: true, horizontal4x3Path: sharedPath,
+        platforms: { bilibili: { horizontal4x3Path: overridePath } } },
+    }));
+    await fs.promises.writeFile(configPath, JSON.stringify({
+      schemaVersion: 2, onboarding: { completed: true }, sourceDirectory: root,
+      availablePlatforms: ["bilibili"], defaultPlatforms: ["bilibili"],
+    }));
+    await fs.promises.writeFile(fakeEgoPath, '#!/bin/sh\ncat > "$VIDEO_PUBLISHER_TEST_SCRIPT"\nexit 1\n', { mode: 0o755 });
+    const result = await run(process.execPath, [path.join(V2_DIR, "run-platform.mjs"), "bilibili", packagePath, "inspect"], {
+      env: { ...process.env, VIDEO_PUBLISHER_CONFIG: configPath,
+        VIDEO_PUBLISHER_V2_EGO_COMMAND: fakeEgoPath, VIDEO_PUBLISHER_TEST_SCRIPT: scriptPath },
+    });
+    assert.equal(result.code, 0, result.stderr);
+    const script = await fs.promises.readFile(scriptPath, "utf8");
+    const adapterPackage = JSON.parse(script.match(/^const pkg = (.+);$/m)[1]);
+    assert.equal(adapterPackage.cover.horizontal4x3Path, overridePath);
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("platform runner does not reject verified long-form Douyin asset during media preflight",async()=>{
   const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-direct-duration-test-"));
   const videoPath=path.join(root,"too-long.mp4");

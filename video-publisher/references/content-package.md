@@ -5,8 +5,11 @@
 优先级：
 
 ```text
-平台专用字段 > 共享字段 > 用户配置 > 通用默认值
+当前用户要求 > 本任务已确认的内容与上游产物 > 用户配置 > 通用默认值
+内容包内：平台专用字段 > 共享字段
 ```
+
+更新内容包时清除与当前要求冲突的旧平台覆盖字段；不能让旧 `xhsTitle` 等字段覆盖用户刚指定的新标题。准备封面并发布的任务必须显式写入 `cover.uploadCustomCover=true` 和全部所选平台需要的路径。
 
 `videoPath` 必须是本地绝对路径，`title` 必须存在。JSON 中的 `\n` 编码在解析后必须成为真实换行，不能把反斜杠和字母 `n` 当作正文保存。
 
@@ -19,13 +22,13 @@ oil 默认只写标题和 tags。不要为小红书、抖音、B 站或视频号
   "videoPath": "/absolute/path/video.mp4",
   "title": "统一标题",
   "xhsTopics": ["主题", "工具", "教程"],
-  "douyinDescription": "简短正文",
+  "douyinDescription": "统一标题",
   "douyinTopics": ["主题", "工具", "教程"],
-  "bilibiliDescription": "简洁简介",
+  "bilibiliDescription": "统一标题",
   "bilibiliTags": ["主题", "工具", "教程"],
   "wechatDescription": "统一标题\n\n#主题 #工具 #教程",
   "wechatTags": ["主题", "工具", "教程"],
-  "youtubeDescription": "完整说明",
+  "youtubeDescription": "统一标题",
   "youtubeTags": [],
   "youtubeAudience": "not_made_for_kids",
   "youtubeVisibility": "private",

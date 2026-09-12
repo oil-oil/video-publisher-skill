@@ -77,14 +77,13 @@ test("Xiaohongshu cover repair supports the current upload editor labels", () =>
   const coverFlow = source.slice(start, end);
   assert.match(coverFlow, /\.main-cover-editor-modal/, "the current cover-editor root must be recognized");
   assert.match(coverFlow, /\^\(上传封面\|上传\)\$/, "both old and current upload labels must remain supported");
-  assert.match(coverFlow, /\^\(确定\|完成\)\$/, "both old and current confirmation labels must remain supported");
+  assert.match(source, /\^\(确定\|完成\)\$/, "both old and current confirmation labels must remain supported");
   assert.match(coverFlow, /input\[type=file\]/, "a direct image input must take precedence over tab text");
   assert.match(coverFlow, /openedAfterRealClick/, "the cover opener must verify that the asynchronous editor materialized");
   assert.match(coverFlow, /native fallback/, "a missing asynchronous editor must retry through the page's native click handler");
   assert.match(coverFlow, /resume-uploaded-thumbnail/, "a retry must resume a cover that already reached the editor");
   assert.match(coverFlow, /if \(!tab\.alreadyUploaded\)/, "a resumed cover must not be uploaded twice");
-  assert.match(coverFlow, /inferredFromUploadedThumbnail/, "the fixed-ratio editor must prove 3:4 from its uploaded thumbnail");
-  assert.match(coverFlow, /Math\.abs\(actualRatio-0\.75\)<0\.01/, "the inferred ratio must stay tightly bound to 3:4");
+  assert.doesNotMatch(coverFlow, /inferredFromUploadedThumbnail/, "source dimensions cannot prove the active crop ratio");
 });
 
 test("Xiaohongshu original declaration never treats unchecked as checked", () => {

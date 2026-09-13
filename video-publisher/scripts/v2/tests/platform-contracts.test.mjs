@@ -146,8 +146,9 @@ test("WeChat Channels cover flow supports both slot-specific and generic editors
   const coverFlow = source.slice(start, end);
   assert.match(coverFlow, /编辑个人主页卡片\|编辑分享卡片\|编辑封面\|裁剪封面图/, "recovery must recognize every live cover-dialog title");
   assert.match(coverFlow, /querySelectorAll\('\.weui-desktop-dialog__wrp'\)/, "cover lookup must not depend on the removed edit-cover-dialog ancestor");
-  assert.match(coverFlow, /dialogs\.find\(el=>String\(el\.innerText\|\|el\.textContent\|\|'\'\)\.includes\(title\)\)\|\|dialogs\.find/, "the exact slot title remains preferred before the generic fallback");
-  assert.match(coverFlow, /\/编辑封面\/\.test\(text\)&&\/上传封面\/\.test\(text\)&&\/取消\/\.test\(text\)&&\/确认\/\.test\(text\)/, "the generic fallback must still prove a complete cover editor");
+  assert.match(coverFlow, /dialogTitle\(el\) === title/, "精确匹配当前编辑器标题，不能匹配祖先的整段文本");
+  assert.match(coverFlow, /candidates\.length !== 1/, "通用编辑器不唯一时停止");
+  assert.match(coverFlow, /closest\('\.weui-desktop-dialog__wrp'\) === dialog/, "输入与预览必须属于当前编辑器");
 });
 
 test("Ego task-space selection rejects a recycled id with another name", () => {

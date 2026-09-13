@@ -76,25 +76,23 @@ Enable `声明原创`. If an agreement dialog appears, accept its checkbox and c
 
 The adapter must verify the checked state after the dialog closes.
 
-## Custom Cover
+## 自定义双封面
 
-When enabled, upload both user-provided assets. Use the same flow first for the personal-profile `3:4` card and then for the share-card `4:3` card:
+启用自定义封面后，分别处理个人主页 `3:4` 和分享卡片 `4:3`，不能用竖版自动裁切代替横版文件。
 
-1. Click `.vertical-cover-wrap .edit-btn` for 3:4 or `.horizon-cover-wrap .edit-btn` for 4:3.
-2. In the active edit-cover dialog, locate its existing image file input across open roots.
-3. Inject the file through its CDP object id; top-document `uploadFile` cannot reach it.
-4. Wait for `.single-cover-uploader-wrap img` to show a real preview.
-5. If `裁剪封面图` is visible, click its visible `确定` first.
-6. Wait for the parent editor to become visible, then click its visible `确认`.
-7. On the share-card path, handle the intermediate `使用此素材` confirmation before the parent `确认` control.
-8. Keep the lifecycle active until the editor closes and the corresponding main-card CDN URL changes.
-9. Persist each URL with its absolute asset path and ratio, then require a separate verify process to find both again.
+1. 记录对应主卡片 URL，再通过 `.vertical-cover-wrap .edit-btn` 或 `.horizon-cover-wrap .edit-btn` 打开编辑器。
+2. 精确匹配可见弹窗自身标题 `编辑个人主页卡片` 或 `编辑分享卡片`。仅在唯一可见的 `编辑封面` 同时包含上传、取消、确认控件时接受通用标题。不能匹配祖先文本中包含的标题。
+3. 记录当前上传预览，只通过该编辑器自身唯一的图片 input 获取 CDP object id，注入对应画幅的精确路径。不得回退到全页图片 input。
+4. 等待当前编辑器自己的新上传预览加载；隐藏弹窗、上一张素材和手机镜像都不能满足此条件。同一文件重试时允许预览 URL 不变，但必须逐字节匹配本次本地图片，仍要检查实际裁剪区。裁剪弹窗可见时先点其 `确定`；出现 `使用此素材` 或 `使用素材` 时完成中间确认，再继续等待父编辑器。
+5. 确认裁剪区 canvas 与新预览的画幅比例和采样像素一致（允许平台等比缩小源图），源图和裁剪框均符合目标比例，完整源图边界与裁剪框重合。无法证明新图选中、发生额外裁切或控件漂移时有限停止，不能直接点父编辑器 `确认`。
+6. 新素材验证通过后点父编辑器 `确认`，持续激活生命周期，等待全部封面弹窗关闭且对应主卡片出现新的服务端 URL。
+7. 保存每槽的精确路径、比例、旧 URL、新 URL、`selectionVerified: true` 和源图尺寸。独立 verify 必须再次找到两个主卡片回执；旧版只有 URL、没有素材选择证明的回执不能判为就绪。
 
-The slot-specific titles `编辑个人主页卡片` and `编辑分享卡片` remain preferred. A current page variant can instead expose the same active editor as `编辑封面`; accept that fallback only when the unique visible dialog also contains `上传封面`, `取消`, and `确认`. Recovery, image-input lookup, and confirmation must search visible `.weui-desktop-dialog__wrp` roots directly instead of depending on the removed `.edit-cover-dialog` ancestor.
+只接受 `.vertical-cover-wrap img.vertical-img-size` 和 `.horizon-cover-wrap img.horizon-img-size` 的服务端 URL。两个槽分别记录，不能把上传调用成功、预览出现或任意 URL 变化当作正确素材已经被接受。
 
-Only `.vertical-cover-wrap img.vertical-img-size` and `.horizon-cover-wrap img.horizon-img-size` are receipt targets. Require separate `3:4` and `4:3` receipts.
+已知封面编辑器或裁剪弹窗遗留时，取消并等待其关闭后再进入对应槽。无法识别的弹窗停止处理，不能当作原创声明弹窗点击。
 
-If a prior attempt leaves `编辑个人主页卡片` or `裁剪封面图` open, safely cancel that known editor, wait for it to close, and retry once. Do not misclassify an unrelated cover dialog as an original-declaration failure.
+回归必须包括：连续上传竖版与横版时旧预览仍留在 DOM 的场景、裁剪或素材中间确认、分享卡片实际画面与横版源图一致、独立 verify 和无操作复跑。只有 READY 日志不能替代画面验收。
 
 ## Required Gates
 

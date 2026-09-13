@@ -30,7 +30,7 @@ async function inspectWechatChannels() {
     return {text:text.slice(0,3000),description,shortTitle,initToast,uploaded,uploading,failed,loginRequired,identityMatches,identityAmbiguous,identityForeign,trustedVideoReceipt,originalEnabled,originalFound:Boolean(originalInput),coverUrls,coverUrlsBySlot,dialogs,videoInputs,rootCount:roots.length,earlyMutation}
   })(${JSON.stringify(wechatDescription)}, ${JSON.stringify(trustedVideoReceipt)})`);
   const buttons=await inspectFinalButtons(/^发表$/);const finalButton=buttons.find(button=>button.buttonish)||buttons[0]||null;const receipt=expectedReceipts.cover||null;
-  const customCoverOk=Boolean(wechatCustomCover&&receipt?.slots&&wechatCoverAssets.every(asset=>{const item=receipt.slots[asset.slot];return item?.assetPath===asset.path&&item?.ratio===asset.ratio&&item?.afterUrl&&(state.coverUrlsBySlot[asset.slot]||[]).includes(item.afterUrl)}));const defaultCoverOk=!wechatCustomCover&&state.uploaded;
+  const customCoverOk=Boolean(wechatCustomCover&&receipt?.slots&&wechatCoverAssets.every(asset=>{const item=receipt.slots[asset.slot];return item?.assetPath===asset.path&&item?.ratio===asset.ratio&&item?.selectionVerified===true&&item?.sourceWidth>0&&item?.sourceHeight>0&&item.sourceWidth*Number(asset.ratio.split(':')[1])===item.sourceHeight*Number(asset.ratio.split(':')[0])&&item?.afterUrl&&(state.coverUrlsBySlot[asset.slot]||[]).includes(item.afterUrl)}));const defaultCoverOk=!wechatCustomCover&&state.uploaded;
   return {gates:{
     authenticated:state.loginRequired?failedGate({loginRequired:true}):okGate({url:PLATFORM_URLS.wechat_channels}),
     draftIdentity:state.identityMatches?okGate({description:state.description,trustedVideoReceipt:state.trustedVideoReceipt}):failedGate({foreign:state.identityForeign,ambiguous:state.identityAmbiguous,description:state.description,expected:wechatDescription}),
@@ -175,30 +175,132 @@ async function dismissWechatCoverEditor(){
   return {ok:false,reason:'wechat cover editor recovery did not close'};
 }
 
+// 所有选择都限制在当前可见编辑器内，不能借用上一个卡片留下的 input 或预览。
+function wechatCoverEditorDom({title, action = 'inspect'}) {
+  const compact = value => String(value || '').replace(/\s+/g, ' ').trim();
+  const roots = [document, ...[...document.querySelectorAll('*')].map(el => el.shadowRoot).filter(Boolean)];
+  const visible = el => {
+    if (!el) return false;
+    const rect = el.getBoundingClientRect(), style = getComputedStyle(el);
+    return rect.width > 4 && rect.height > 4 && style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) > 0;
+  };
+  const dialogs = roots.flatMap(root => [...root.querySelectorAll('.weui-desktop-dialog__wrp')]).filter(visible);
+  const dialogTitle = el => compact(el.querySelector('.weui-desktop-dialog__title')?.textContent);
+  const exact = dialogs.filter(el => dialogTitle(el) === title);
+  const generic = dialogs.filter(el => {
+    const text = compact(el.innerText || el.textContent);
+    return dialogTitle(el) === '编辑封面' && /上传封面/.test(text) && /取消/.test(text) && /确认/.test(text);
+  });
+  const candidates = exact.length ? exact : generic;
+  if (candidates.length !== 1) return action === 'input' ? null : {ok:false, reason:'当前封面编辑器不唯一或不可见'};
+  const dialog = candidates[0];
+  const owned = selector => [...dialog.querySelectorAll(selector)].filter(el => el.closest('.weui-desktop-dialog__wrp') === dialog);
+  const inputs = owned('input[type=file]').filter(el => /image|png|jpe?g/i.test(el.accept || ''));
+  if (action === 'input') return inputs.length === 1 ? inputs[0] : null;
+  const button = (root, text) => [...root.querySelectorAll('button,[role="button"]')].find(el =>
+    el.closest('.weui-desktop-dialog__wrp') === root && compact(el.innerText || el.textContent) === text && visible(el) && !el.disabled && !/disabled/.test(String(el.className || '')));
+  const crops = dialogs.filter(el => dialogTitle(el) === '裁剪封面图' && dialog.contains(el));
+  if (crops.length) {
+    if (action === 'advance' && crops.length === 1) {
+      const confirm = button(crops[0], '确定');
+      if (confirm) { confirm.click(); return {ok:true, intermediate:'crop'}; }
+    }
+    return {ok:true, pending:'crop'};
+  }
+  const material = button(dialog, '使用此素材') || button(dialog, '使用素材');
+  if (material) {
+    if (action === 'advance') { material.click(); return {ok:true, intermediate:'material'}; }
+    return {ok:true, pending:'material'};
+  }
+  const preview = owned('.single-cover-uploader-wrap img').find(el => visible(el) && el.complete && el.naturalWidth > 0);
+  const canvas = owned('.crop-image-container canvas.cr-image').find(visible);
+  const viewport = owned('.crop-image-container .cr-viewport').find(visible);
+  let sourceMatchesPreview = false;
+  let sourcePixelError = null;
+  if (preview && canvas && canvas.width > 0 && canvas.height > 0 && canvas.width * preview.naturalHeight === canvas.height * preview.naturalWidth) {
+    try {
+      const sample = source => {
+        const probe = document.createElement('canvas'); probe.width = probe.height = 16;
+        const ctx = probe.getContext('2d'); ctx.drawImage(source, 0, 0, 16, 16);
+        return ctx.getImageData(0, 0, 16, 16).data;
+      };
+      const left = sample(preview), right = sample(canvas);
+      sourcePixelError = left.reduce((sum, value, index) => sum + Math.abs(value - right[index]), 0) / left.length;
+      sourceMatchesPreview = sourcePixelError <= 3;
+    } catch { /* 无法读取图像时不把它当作已选中。 */ }
+  }
+  const crop = viewport?.getBoundingClientRect(), rendered = canvas?.getBoundingClientRect();
+  const fullImageVisible = Boolean(crop && rendered && ['width','height','left','top'].every(key => Math.abs(crop[key] - rendered[key]) <= 2));
+  if (action === 'confirm') {
+    const confirm = button(dialog, '确认');
+    if (!confirm) return {ok:false, reason:'封面确认按钮尚不可用'};
+    confirm.click(); return {ok:true};
+  }
+  return {ok:true, previewUrl:preview?.currentSrc || preview?.src || '',
+    sourceWidth:canvas?.width || 0, sourceHeight:canvas?.height || 0,
+    previewWidth:preview?.naturalWidth || 0, previewHeight:preview?.naturalHeight || 0,
+    cropWidth:crop?.width || 0, cropHeight:crop?.height || 0, sourceMatchesPreview, sourcePixelError, fullImageVisible};
+}
+
+async function readWechatCoverEditor(asset, action = 'inspect') {
+  return await js(`(${wechatCoverEditorDom.toString()})(${JSON.stringify({title:asset.dialogTitle, action})})`);
+}
+
+function wechatCoverSelectionReady(state, asset, beforePreviewUrl, expectedImageBase64 = '') {
+  const [width, height] = asset.ratio.split(':').map(Number);
+  // 同一文件重试可能产生相同 data URL；只有逐字节匹配本次本地文件才接受旧 URL。
+  const exactFile = expectedImageBase64 && /^data:image\/[^;]+;base64,/.test(state.previewUrl || '')
+    && state.previewUrl.slice(state.previewUrl.indexOf(',') + 1) === expectedImageBase64;
+  return state.ok && !state.pending && state.previewUrl && (state.previewUrl !== beforePreviewUrl || exactFile)
+    && state.sourceMatchesPreview === true && state.fullImageVisible === true
+    && state.sourceWidth > 0 && state.sourceHeight > 0
+    && state.sourceWidth * height === state.sourceHeight * width
+    && Math.abs(state.cropWidth / state.cropHeight - width / height) < 0.01;
+}
+
 async function uploadWechatCover(asset){
   if(!wechatCustomCover)return {ok:true,skipped:true};
   await activateWechatLifecycle();
   const before=(await inspectWechatChannels()).gates.cover.evidence?.urlsBySlot?.[asset.slot]||[];
+  const expectedImageBase64=fs.readFileSync(asset.path).toString('base64');
   const opened=await js(String.raw`((selector) => {const roots=[document,...[...document.querySelectorAll('*')].map(el=>el.shadowRoot).filter(Boolean)];const entry=roots.flatMap(root=>[...root.querySelectorAll(selector+' .edit-btn')]).find(el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>4&&r.height>4&&s.display!=='none'&&s.visibility!=='hidden'});if(!entry)return {ok:false,reason:'wechat cover edit entry missing'};entry.click();return {ok:true}})(${JSON.stringify(asset.wrap)})`);
   if(!opened.ok)return opened;
-  await wait(2);
-  await activateWechatLifecycle();
-  const evaluated=await cdp('Runtime.evaluate',{expression:String.raw`((title) => {const compact=v=>String(v||'').replace(/\s+/g,' ').trim();const roots=[document,...[...document.querySelectorAll('*')].map(el=>el.shadowRoot).filter(Boolean)];const visible=el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>20&&r.height>20&&s.display!=='none'&&s.visibility!=='hidden'&&Number(s.opacity||1)>0};const dialogs=roots.flatMap(root=>[...root.querySelectorAll('.weui-desktop-dialog__wrp')]).filter(visible);const dialog=dialogs.find(el=>String(el.innerText||el.textContent||'').includes(title))||dialogs.find(el=>{const text=compact(el.innerText||el.textContent||'');return /编辑封面/.test(text)&&/上传封面/.test(text)&&/取消/.test(text)&&/确认/.test(text)});return dialog?.querySelector('input[type=file][accept*="image"]')||roots.flatMap(root=>[...root.querySelectorAll('input[type=file]')]).find(el=>/image|png|jpe?g/i.test(el.accept||''))})(${JSON.stringify(asset.dialogTitle)})`,objectGroup:'video-publisher-v2-wechat-cover',includeCommandLineAPI:true});
+  let initial;
+  for(let i=0;i<15;i+=1){
+    await activateWechatLifecycle();
+    initial=await readWechatCoverEditor(asset);
+    if(initial.ok)break;
+    await wait(1);
+  }
+  if(!initial?.ok)return {ok:false,reason:'当前封面编辑器未就绪'};
+  const evaluated=await cdp('Runtime.evaluate',{
+    expression:`(${wechatCoverEditorDom.toString()})(${JSON.stringify({title:asset.dialogTitle,action:'input'})})`,
+    objectGroup:'video-publisher-v2-wechat-cover',includeCommandLineAPI:true,
+  });
   const objectId=evaluated?.result?.objectId;
-  if(!objectId)return {ok:false,reason:'wechat cover image input objectId missing'};
+  if(!objectId)return {ok:false,reason:'当前封面编辑器缺少唯一的图片上传控件'};
   try{await cdp('DOM.setFileInputFiles',{objectId,files:[asset.path]})}catch(error){return {ok:false,reason:String(error?.message||error)}}
-  let previewReady=false;
-  for(let i=0;i<20;i+=1){await activateWechatLifecycle();previewReady=await js(String.raw`(() => {const roots=[document,...[...document.querySelectorAll('*')].map(el=>el.shadowRoot).filter(Boolean)];return roots.flatMap(root=>[...root.querySelectorAll('.single-cover-uploader-wrap img')]).some(el=>/^(data:|blob:|https?:)/.test(el.currentSrc||el.src||''))})()`);if(previewReady)break;await wait(1)}
-  if(!previewReady)return {ok:false,reason:'wechat custom cover preview did not become ready'};
-  let confirmed={ok:false,reason:'wechat cover confirm missing or disabled'};
-  for(let i=0;i<20;i+=1){await activateWechatLifecycle();confirmed=await js(String.raw`((title) => {const compact=v=>String(v||'').replace(/\s+/g,' ').trim();const roots=[document,...[...document.querySelectorAll('*')].map(el=>el.shadowRoot).filter(Boolean)];const visible=el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>20&&r.height>20&&s.display!=='none'&&s.visibility!=='hidden'&&Number(s.opacity||1)>0};const material=roots.flatMap(root=>[...root.querySelectorAll('button,[role="button"]')]).find(el=>compact(el.innerText||el.textContent||'')==='使用素材'&&visible(el)&&!el.disabled);if(material){material.click();return {ok:false,waiting:true,materialConfirmed:true}}const dialogs=roots.flatMap(root=>[...root.querySelectorAll('.weui-desktop-dialog__wrp')]).filter(visible);const crop=dialogs.find(el=>/裁剪封面图/.test(el.innerText||el.textContent||''));if(crop){const cropButton=[...crop.querySelectorAll('button,[role="button"]')].find(el=>compact(el.innerText||el.textContent||'')==='确定'&&visible(el)&&!el.disabled);if(cropButton){cropButton.click();return {ok:false,waiting:true,cropConfirmed:true}}}const dialog=dialogs.find(el=>String(el.innerText||el.textContent||'').includes(title))||dialogs.find(el=>{const text=compact(el.innerText||el.textContent||'');return /编辑封面/.test(text)&&/上传封面/.test(text)&&/取消/.test(text)&&/确认/.test(text)});const button=[...(dialog?.querySelectorAll('button,[role="button"]')||[])].find(el=>compact(el.innerText||el.textContent||'')==='确认'&&visible(el)&&!el.disabled&&!/disabled/.test(String(el.className||'')));if(!button)return {ok:false,waiting:true,reason:'wechat cover confirm not visible yet'};button.click();return {ok:true}})(${JSON.stringify(asset.dialogTitle)})`);if(confirmed.ok)break;await wait(1)}
-  if(!confirmed.ok)return {ok:false,reason:confirmed.reason||'wechat cover confirm missing or disabled'};
+  let selected;
+  for(let i=0;i<40;i+=1){
+    await activateWechatLifecycle();
+    selected=await readWechatCoverEditor(asset);
+    if(selected.pending)await readWechatCoverEditor(asset,'advance');
+    else if(wechatCoverSelectionReady(selected,asset,initial.previewUrl,expectedImageBase64))break;
+    await wait(1);
+  }
+  if(!wechatCoverSelectionReady(selected,asset,initial.previewUrl,expectedImageBase64)){
+    const {previewUrl,...evidence}=selected||{};
+    return {ok:false,reason:`视频号 ${asset.ratio} 新素材未在当前裁剪区完整选中`,evidence};
+  }
+  const confirmed=await readWechatCoverEditor(asset,'confirm');
+  if(!confirmed.ok)return confirmed;
   let after=[];let dialogClosed=false;
   for(let i=0;i<30;i+=1){await activateWechatLifecycle();const state=await inspectWechatChannels();after=state.gates.cover.evidence?.urlsBySlot?.[asset.slot]||[];dialogClosed=state.gates.noBlockingDialog.ok;if(after.some(url=>!before.includes(url))&&dialogClosed)break;await wait(1)}
-  const afterUrl=after.find(url=>!before.includes(url));
+  const afterUrl=after.find(url=>/^https?:\/\//.test(url)&&!before.includes(url));
   if(!afterUrl)return {ok:false,reason:`wechat ${asset.slot} cover card did not change`,before,after};
-  if(!dialogClosed)return {ok:false,reason:'wechat vertical cover confirmation dialog did not close',before,after};
-  return {ok:true,receipt:{assetPath:asset.path,ratio:asset.ratio,beforeUrls:before,afterUrl}};
+  if(!dialogClosed)return {ok:false,reason:'wechat cover confirmation dialog did not close',before,after};
+  return {ok:true,receipt:{assetPath:asset.path,ratio:asset.ratio,beforeUrls:before,afterUrl,
+    selectionVerified:true,sourceWidth:selected.sourceWidth,sourceHeight:selected.sourceHeight}};
 }
 
 async function ensureWechatEarlyMetadata(before){
@@ -230,6 +332,6 @@ async function prefillWechatChannels(){
   return {...metadata.current,actions:{...metadata.actions,prefill:{completedDuringUpload:uploading}}};
 }
 
-async function mutateWechatChannels(){let before=await inspectWechatChannels();if(!before.gates.draftIdentity.ok)return {...before,blocker:typedBlocker(before.gates.draftIdentity.evidence?.ambiguous?'STATE_AMBIGUOUS':'FOREIGN_DRAFT','视频号无法证明当前已上传草稿属于本任务',{evidence:before.gates.draftIdentity.evidence})};if(!before.gates.video.ok)return {...before,blocker:typedBlocker('STATE_AMBIGUOUS','视频号没有可修复的已上传视频')};const actions={};if(!before.gates.noBlockingDialog.ok&&before.gates.noBlockingDialog.evidence?.active?.some(item=>/编辑个人主页卡片|编辑分享卡片|裁剪封面图/.test(item.text||''))){actions.coverRecovery=await dismissWechatCoverEditor();if(!actions.coverRecovery.ok)return {...(await inspectWechatChannels()),blocker:typedBlocker('STATE_AMBIGUOUS',actions.coverRecovery.reason,{retryable:true,evidence:actions.coverRecovery})};before=await inspectWechatChannels()}if(!before.gates.noBlockingDialog.ok)return {...before,blocker:typedBlocker('STATE_AMBIGUOUS','视频号存在未识别的阻塞弹窗',{retryable:true,evidence:before.gates.noBlockingDialog.evidence})};const metadata=await ensureWechatEarlyMetadata(before);Object.assign(actions,metadata.actions);if(!metadata.ok)return {...metadata.current,actions,blocker:metadata.blocker};before=metadata.current;actions.original=await ensureWechatOriginal();if(!actions.original.ok)return {...(await inspectWechatChannels()),blocker:typedBlocker('ACTION_FAILED',actions.original.reason||'视频号原创声明没有完成',{evidence:actions.original})};const receipts={};if(wechatCustomCover){receipts.cover={slots:{}};for(const asset of wechatCoverAssets){const uploaded=await uploadWechatCover(asset);(actions.covers||=[]).push({asset,...uploaded});if(!uploaded.ok)return {...(await inspectWechatChannels()),blocker:typedBlocker('PLATFORM_REJECTED_ASSET',uploaded.reason,{retryable:true,evidence:uploaded})};receipts.cover.slots[asset.slot]=uploaded.receipt;actions.receiptCheckpoint=checkpointReceipts({...expectedReceipts,...receipts})}expectedReceipts.cover=receipts.cover}actions.receiptCheckpoint=checkpointReceipts({...expectedReceipts,...receipts});const after=await inspectWechatChannels();return {...after,actions,receipts}}
+async function mutateWechatChannels(){let before=await inspectWechatChannels();if(!before.gates.draftIdentity.ok)return {...before,blocker:typedBlocker(before.gates.draftIdentity.evidence?.ambiguous?'STATE_AMBIGUOUS':'FOREIGN_DRAFT','视频号无法证明当前已上传草稿属于本任务',{evidence:before.gates.draftIdentity.evidence})};if(!before.gates.video.ok)return {...before,blocker:typedBlocker('STATE_AMBIGUOUS','视频号没有可修复的已上传视频')};const actions={};if(!before.gates.noBlockingDialog.ok&&before.gates.noBlockingDialog.evidence?.active?.some(item=>/编辑个人主页卡片|编辑分享卡片|编辑封面|裁剪封面图/.test(item.text||''))){actions.coverRecovery=await dismissWechatCoverEditor();if(!actions.coverRecovery.ok)return {...(await inspectWechatChannels()),blocker:typedBlocker('STATE_AMBIGUOUS',actions.coverRecovery.reason,{retryable:true,evidence:actions.coverRecovery})};before=await inspectWechatChannels()}if(!before.gates.noBlockingDialog.ok)return {...before,blocker:typedBlocker('STATE_AMBIGUOUS','视频号存在未识别的阻塞弹窗',{retryable:true,evidence:before.gates.noBlockingDialog.evidence})};const metadata=await ensureWechatEarlyMetadata(before);Object.assign(actions,metadata.actions);if(!metadata.ok)return {...metadata.current,actions,blocker:metadata.blocker};before=metadata.current;actions.original=await ensureWechatOriginal();if(!actions.original.ok)return {...(await inspectWechatChannels()),blocker:typedBlocker('ACTION_FAILED',actions.original.reason||'视频号原创声明没有完成',{evidence:actions.original})};const receipts={};if(wechatCustomCover){receipts.cover={slots:{}};for(const asset of wechatCoverAssets){const uploaded=await uploadWechatCover(asset);(actions.covers||=[]).push({asset,...uploaded});if(!uploaded.ok)return {...(await inspectWechatChannels()),blocker:typedBlocker('PLATFORM_REJECTED_ASSET',uploaded.reason,{retryable:true,evidence:uploaded})};receipts.cover.slots[asset.slot]=uploaded.receipt;actions.receiptCheckpoint=checkpointReceipts({...expectedReceipts,...receipts})}expectedReceipts.cover=receipts.cover}actions.receiptCheckpoint=checkpointReceipts({...expectedReceipts,...receipts});const after=await inspectWechatChannels();return {...after,actions,receipts}}
 
 async function runPlatformPhase(){if(phase==='inspect'||phase==='verify')return await inspectWechatChannels();if(phase==='upload_start')return await startWechatChannelsUpload();if(phase==='prefill')return await prefillWechatChannels();if(phase==='upload')return await uploadWechatChannels();if(phase==='mutate')return await mutateWechatChannels();return {...(await inspectWechatChannels()),blocker:typedBlocker('ACTION_FAILED',`unsupported WeChat phase: ${phase}`)}}

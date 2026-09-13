@@ -81,7 +81,7 @@ oil-cover 产出的 `<视频名>_4x3.png` 对应 B站 `horizontal4x3Path`；编�
 小红书：主预览通常来自 ros-preview.xhscdn.com。
 抖音：竖版和横版主卡片必须得到两个不同的接受 URL。
 B站：编辑器关闭，主 `.cover-img` 来自 archive.biliimg.com 或 biliimg.com。
-视频号：3:4 与 4:3 主卡片 URL 都要变化，两个编辑器都关闭，并通过独立验证；忽略 data URL 裁剪预览和手机镜像。
+视频号：两个槽各自证明新素材已在当前裁剪区完整选中，再确认并取得变化后的主卡片 URL；独立验证要求素材选择证明和两个已关闭编辑器。不能用旧预览、data URL 或手机镜像代替接受回执。
 YouTube：接受的 16:9 缩略图必须是绑定当前 videoId 的服务端 URL；blob、data 或本地预览不足。
 ```
 

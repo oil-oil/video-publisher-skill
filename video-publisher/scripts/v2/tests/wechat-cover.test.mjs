@@ -66,6 +66,20 @@ test('裁剪弹窗出现时不能提前确认父编辑器',()=>{
   assert.equal(f.run('advance').intermediate,'crop');assert.deepEqual(f.clicks,['crop']);
 });
 
+test('封面推荐浮层只进入直接编辑，未知或重复浮层不操作',()=>{
+  const clicks=[];
+  const button={textContent:'直接编辑',disabled:false,getBoundingClientRect:()=>({width:80,height:30}),click:()=>clicks.push('direct')};
+  const popover={getBoundingClientRect:()=>({width:250,height:300}),querySelector:()=>({textContent:'使用此素材作为封面？'}),querySelectorAll:()=>[button]};
+  let popovers=[popover];
+  const document={querySelectorAll:selector=>selector==='[role="tooltip"]'?popovers:[]};
+  const run=action=>vm.runInNewContext(`(${helpers.wechatCoverEditorDom.toString()})(${JSON.stringify({title:'编辑分享卡片',action})})`,{document,getComputedStyle:()=>({display:'block',visibility:'visible',opacity:1})});
+  assert.equal(run('inspect').pending,'recommendation');assert.deepEqual(clicks,[]);
+  assert.equal(run('input'),null);
+  assert.equal(run('advance').intermediate,'recommendation');assert.deepEqual(clicks,['direct']);
+  popovers=[popover,popover];assert.equal(run('advance').ok,false);assert.deepEqual(clicks,['direct']);
+  popovers=[{...popover,querySelector:()=>({textContent:'其他推荐'})}];assert.equal(run('advance').ok,false);
+});
+
 async function uploadFixture(states,{closed=true}={}) {
   const calls=[];
   const upload=new AsyncFunction('pkg','js','cdp','wait','read','inspect','fs',`${source}
@@ -94,6 +108,13 @@ test('生产上传流程等待当前新图选中后才确认，并传递横版�
   assert.ok(calls.indexOf('confirm')>calls.indexOf('advance'));
 });
 
+test('上传入口先通过推荐浮层，再等待真实编辑器并上传横图',async()=>{
+  const {result,calls}=await uploadFixture([{ok:true,pending:'recommendation'},{...valid,previewUrl:'data:old'},valid]);
+  assert.equal(result.ok,true);
+  assert.ok(calls.indexOf('advance')<calls.findIndex(c=>c.method==='DOM.setFileInputFiles'));
+  assert.deepEqual(calls.find(c=>c.method==='DOM.setFileInputFiles').files,['/fixture/landscape.png']);
+});
+
 test('旧竖版预览持续存在时有限停止，不确认、不产生接受回执',async()=>{
   const {result,calls}=await uploadFixture([{...valid,previewUrl:'data:old'}]);
   assert.equal(result.ok,false);assert.equal(result.receipt,undefined);
@@ -117,4 +138,25 @@ test('独立验证拒绝旧版 URL 回执和缺少任一画幅的选择证明',a
   assert.equal((await run()).gates.cover.ok,true);
   slots.horizontal.sourceWidth=960;
   assert.equal((await run()).gates.cover.ok,false);
+});
+
+test('合并槽只验证竖封面，未知布局仍要求双槽且保留原创缺失',async()=>{
+  const inspect=new AsyncFunction('pkg','expectedReceipts','expectedVideoReceipt','jobFingerprint','activeTaskSpace','js','inspectFinalButtons','PLATFORM_URLS','okGate','failedGate','compactText',`${source}\nreturn await inspectWechatChannels();`);
+  const slots={vertical:{assetPath:pkg.cover.vertical3x4Path,ratio:'3:4',afterUrl:'https://server/v',selectionVerified:true,sourceWidth:1086,sourceHeight:1448}};
+  const state={identityMatches:true,uploaded:true,description:pkg.wechatDescription,shortTitle:'',originalEnabled:false,originalFound:false,coverLayout:'combined-3:4',coverUrlsBySlot:{vertical:['https://server/v'],horizontal:[]},coverUrls:[],dialogs:[]};
+  const run=()=>inspect(pkg,{cover:{slots}},null,'test',{id:44},async()=>state,async()=>[{buttonish:true,disabled:false}],{},evidence=>({ok:true,evidence}),evidence=>({ok:false,evidence}),s=>s.trim());
+  let result=await run();assert.equal(result.gates.cover.ok,true);assert.equal(result.gates.original.ok,false);
+  state.coverLayout='unknown';assert.equal((await run()).gates.cover.ok,false);
+});
+
+test('原创入口缺失仍交付合并封面，复跑不再次上传且不会吞掉 blocker',async()=>{
+  const calls=[];const receipts={};
+  const run=new AsyncFunction('pkg','expectedReceipts','checkpointReceipts','typedBlocker','probe','upload',`${source}
+    inspectWechatChannels=probe;ensureWechatEarlyMetadata=async current=>({ok:true,actions:{},current});
+    ensureWechatOriginal=async()=>({ok:false,reason:'original absent'});uploadWechatCover=upload;
+    return await mutateWechatChannels();`);
+  const probe=async()=>({gates:{draftIdentity:{ok:true},video:{ok:true},noBlockingDialog:{ok:true},original:{ok:false},cover:{ok:Boolean(receipts.cover),evidence:{layout:'combined-3:4',urlsBySlot:{vertical:receipts.cover?['https://server/v']:[],horizontal:[]}}}}});
+  const execute=()=>run(pkg,receipts,()=>({ok:true}),(code,message)=>({code,message}),probe,async asset=>{calls.push(asset.slot);return {ok:true,receipt:{assetPath:asset.path,ratio:asset.ratio,afterUrl:'https://server/v',selectionVerified:true,sourceWidth:1086,sourceHeight:1448}}});
+  for(let i=0;i<2;i++){const result=await execute();assert.equal(result.blocker.code,'SELECTOR_DRIFT');assert.equal(result.gates.original.ok,false);assert.equal(result.gates.cover.ok,true);}
+  assert.deepEqual(calls,['vertical']);
 });

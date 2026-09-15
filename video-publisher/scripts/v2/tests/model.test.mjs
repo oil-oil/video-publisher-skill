@@ -98,3 +98,15 @@ test("YouTube READY requires audience, full settings, visibility, and final-save
     "finalButton", "safety",
   ]);
 });
+
+
+test("抖音不再以同步设置阻塞就绪，封面与安全校验仍然必需", () => {
+  assert.equal(requiredGates("douyin").includes("settings"), false);
+  const valid = observation("douyin", {gates: {settings: {ok: false}}});
+  assert.equal(evaluateObservation(valid).ready, true);
+  for (const name of ["video", "title", "description", "tags", "cover", "safety"]) {
+    const invalid = observation("douyin", {gates: {[name]: {ok: false}}});
+    assert.equal(evaluateObservation(invalid).ready, false);
+    assert.ok(evaluateObservation(invalid).missing.includes(name));
+  }
+});

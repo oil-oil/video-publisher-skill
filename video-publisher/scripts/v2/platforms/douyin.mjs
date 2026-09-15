@@ -53,20 +53,9 @@ async function inspectDouyin() {
     const identityEmpty = !title && !editorText
     const knownMisroutedInput = title === String(expectedTitle + expectedDescription).slice(0, 30)
     const identityMatches = title === expectedTitle || editorText.includes(expectedDescription) || identityEmpty || knownMisroutedInput
-    const toutiaoLabel = [...document.querySelectorAll('div,span')]
-      .map(el=>({el,text:compact(el.innerText||el.textContent||''),r:el.getBoundingClientRect()}))
-      .filter(item=>item.text==='今日头条'&&item.r.width>20&&item.r.height>12)
-      .sort((a,b)=>(a.r.width*a.r.height)-(b.r.width*b.r.height))[0]?.el
-    let syncRow=toutiaoLabel
-    while(syncRow&&!syncRow.querySelector('[role="switch"],input[type="checkbox"],[class*="semi-switch"]'))syncRow=syncRow.parentElement
-    const sync=syncRow?.querySelector('input[role="switch"],input[type="checkbox"],[role="switch"],[class*="semi-switch"]')
-    const syncOn=Boolean(sync&&(sync.checked===true||sync.getAttribute('aria-checked')==='true'||/checked|active|open|\bon\b/i.test(String(sync.className||''))))
-    const syncRadios=[...document.querySelectorAll('label')].map(el=>({text:compact(el.innerText||el.textContent||''),input:el.querySelector('input.radio-native-p6VBGt,input[type="checkbox"]')})).filter(item=>/^(不同时发布|同时发布到)/.test(item.text))
-    const noSyncChecked=Boolean(syncRadios.find(item=>item.text.startsWith('不同时发布'))?.input?.checked)
-    const simultaneousChecked=Boolean(syncRadios.find(item=>item.text.startsWith('同时发布到'))?.input?.checked)
     const topicControlReady=[...document.querySelectorAll('button,[role="button"],div,span')]
       .some(el=>visible(el)&&compact(el.innerText||el.textContent||'')==='#添加话题')
-    const earlyMutationReady=visible(titleInput)&&visible(editor)&&topicControlReady&&syncRadios.length>0&&(uploading||uploadSucceeded)
+    const earlyMutationReady=visible(titleInput)&&visible(editor)&&topicControlReady&&(uploading||uploadSucceeded)
     const coverUrls = {}
     for (const [slot,re] of [['landscape',/横封面\s*4\s*:\s*3|横封面4:3/],['portrait',/竖封面\s*3\s*:\s*4|竖封面3:4/]]) {
       const card=[...document.querySelectorAll('.coverControl-CjlzqC')].find(el=>re.test(compact(el.innerText||el.textContent||'')))
@@ -77,7 +66,7 @@ async function inspectDouyin() {
     const dialogs=[...document.querySelectorAll('[role="dialog"],.semi-modal,[class*="modal-mask"],[class*="dialog-mask"]')]
       .map(el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return {text:compact(el.innerText||el.textContent||'').slice(0,500),cls:String(el.className||''),w:r.width,h:r.height,display:s.display,visibility:s.visibility,opacity:s.opacity}})
       .filter(item=>item.w>20&&item.h>20&&item.display!=='none'&&item.visibility!=='hidden'&&!/animate-hide|leave-active/.test(item.cls))
-    return {text:text.slice(0,2800),title,editorText,prose,selected,plainResidue,duplicates,tokenCounts,uploadSucceeded,uploading,uploadFailed,loginRequired,resumeDialog,identityMatches,identityEmpty,knownMisroutedInput,syncOn,syncFound:Boolean(sync),noSyncChecked,simultaneousChecked,topicControlReady,earlyMutationReady,titleInputReady:visible(titleInput),editorReady:visible(editor),settingsReady:syncRadios.length>0,coverUrls,dialogs}
+    return {text:text.slice(0,2800),title,editorText,prose,selected,plainResidue,duplicates,tokenCounts,uploadSucceeded,uploading,uploadFailed,loginRequired,resumeDialog,identityMatches,identityEmpty,knownMisroutedInput,topicControlReady,earlyMutationReady,titleInputReady:visible(titleInput),editorReady:visible(editor),coverUrls,dialogs}
   })(${JSON.stringify(douyinTitle)}, ${JSON.stringify(douyinDescription)}, ${JSON.stringify(douyinTopics)})`);
   const buttons = await inspectFinalButtons(/^发布$/);
   const finalButton = buttons.find(button=>button.buttonish) || buttons[0] || null;
@@ -96,7 +85,6 @@ async function inspectDouyin() {
       title: state.title===douyinTitle ? okGate({expected:douyinTitle,actual:state.title}) : failedGate({expected:douyinTitle,actual:state.title}),
       description: state.prose===douyinDescription ? okGate({expected:douyinDescription,actual:state.prose}) : failedGate({expected:douyinDescription,actual:state.prose,editorText:state.editorText}),
       tags: state.selected.length===douyinTopics.length&&!state.plainResidue.length&&!state.duplicates.length ? okGate({requested:douyinTopics,selected:state.selected,tokenCounts:state.tokenCounts}) : failedGate({requested:douyinTopics,selected:state.selected,plainResidue:state.plainResidue,duplicates:state.duplicates,tokenCounts:state.tokenCounts,editorText:state.editorText}),
-      settings: state.noSyncChecked&&!state.syncOn&&!state.simultaneousChecked ? okGate({simultaneousPublish:false,toutiaoSync:false}) : failedGate({simultaneousPublish:state.simultaneousChecked,noSyncChecked:state.noSyncChecked,toutiaoSync:state.syncOn,syncFound:state.syncFound}),
       cover: coverReceiptOk||defaultCoverOk ? okGate({custom:douyinCustomCover,urls:state.coverUrls,receipt}) : failedGate({custom:douyinCustomCover,urls:state.coverUrls,receipt,reason:douyinCustomCover&&!receipt?'custom cover receipt missing':'cover not verified'}),
       noBlockingDialog: state.dialogs.length===0 ? okGate({active:[]}) : failedGate({active:state.dialogs}),
       finalButton: finalButton&&!finalButton.disabled ? okGate(finalButton) : failedGate({buttons}),
@@ -110,7 +98,6 @@ async function inspectDouyin() {
         titleReady:state.titleInputReady,
         editorReady:state.editorReady,
         topicControlReady:state.topicControlReady,
-        settingsReady:state.settingsReady,
       },
     },
   };
@@ -426,12 +413,10 @@ async function recoverDouyinTopicPrefix(before) {
   return {ok:true,recoverable:true,selected,nextIndex:selected.length,cleanup};
 }
 
-async function turnOffDouyinSync() {
-  const located=await js(String.raw`(() => {const c=v=>String(v||'').replace(/\s+/g,' ').trim();const label=[...document.querySelectorAll('label')].find(el=>c(el.innerText||el.textContent||'').startsWith('不同时发布'));if(!label)return {ok:false,reason:'douyin no-sync radio missing'};const input=label.querySelector('input');label.scrollIntoView({block:'center',inline:'center'});const r=label.getBoundingClientRect();return {ok:true,on:Boolean(input?.checked),point:{x:r.left+r.width/2,y:r.top+r.height/2}}})()`);
-  if(!located.ok)return located;if(!located.on){await click([located.point.x,located.point.y],{label:'disable douyin simultaneous publish'}).catch(()=>{});await wait(1)}const after=await inspectDouyin();return after.gates.settings.ok?{ok:true,wasOn:!located.on}:{ok:false,reason:'douyin simultaneous publish remained enabled',evidence:after.gates.settings.evidence};
-}
-
 async function uploadDouyinCoverSlot(asset) {
+  await cdp('Page.bringToFront',{});
+  await cdp('Page.setWebLifecycleState',{state:'active'});
+  await cdp('Emulation.setFocusEmulationEnabled',{enabled:true});
   await js(String.raw`(() => {document.querySelectorAll('[class*="animate-hide"]').forEach(el=>{el.style.pointerEvents='none'});return true})()`);
   const active=await js(String.raw`(() => Boolean([...document.querySelectorAll('[role="dialog"]')].find(el=>!/animate-hide/.test(String(el.className||''))&&(el.innerText||el.textContent||'').includes('封面'))))()`);
   if(!active){
@@ -441,9 +426,16 @@ async function uploadDouyinCoverSlot(asset) {
   const exposed=await js(String.raw`((slot) => {const dialog=[...document.querySelectorAll('[role="dialog"]')].find(el=>!/animate-hide/.test(String(el.className||''))&&(el.innerText||el.textContent||'').includes('封面'));if(!dialog)return {ok:false,reason:'douyin cover dialog missing'};const active=[...dialog.querySelectorAll('[class*="step-active"]')].map(el=>(el.innerText||el.textContent||'').replace(/\s+/g,' ').trim()).join(' ');const expected=slot==='portrait'?'竖封面':'横封面';if(active&&!active.includes(expected))return {ok:false,reason:'douyin cover dialog opened on wrong slot',active,expected};const input=dialog.querySelector('.upload-BvM5FF input.semi-upload-hidden-input')||[...dialog.querySelectorAll('input[type=file]')].find(el=>(el.parentElement?.innerText||'').includes('点击上传文件'));if(!input)return {ok:false,reason:'douyin custom cover input missing'};input.id='vp2-douyin-cover-'+slot;return {ok:true,selector:'#'+input.id,active}})(${JSON.stringify(asset.slot)})`);
   if(!exposed.ok)return exposed;try{await uploadFile(exposed.selector,asset.path)}catch(error){return {ok:false,reason:String(error?.message||error)}}await wait(3);
   const allowedLabels=asset.slot==='portrait'?['设置横封面','完成']:['完成'];let action=null;
-  for(let attempt=0;attempt<30&&!action;attempt+=1){action=await js(String.raw`((labels) => {const c=v=>String(v||'').replace(/\s+/g,' ').trim();const dialog=[...document.querySelectorAll('[role="dialog"]')].find(el=>!/animate-hide/.test(String(el.className||'')));const buttons=[...dialog?.querySelectorAll('button,[role="button"]')||[]];for(const label of labels){const button=buttons.find(el=>c(el.innerText||el.textContent||'')===label&&!el.disabled&&el.getAttribute('aria-disabled')!=='true'&&!/disabled/.test(String(el.className||'')));if(button){const r=button.getBoundingClientRect();return{label,x:r.left+r.width/2,y:r.top+r.height/2}}}return null})(${JSON.stringify(allowedLabels)})`);if(!action)await wait(.75)}
-  if(!action)return {ok:false,reason:`douyin ${allowedLabels.join(' or ')} button did not enable`,slot:asset.slot};await click([action.x,action.y],{label:`douyin cover ${action.label}`}).catch(()=>{});
-  if(action.label==='完成'){let closed=false;for(let attempt=0;attempt<40;attempt+=1){closed=await js(String.raw`(() => ![...document.querySelectorAll('[role="dialog"]')].some(el=>!/animate-hide/.test(String(el.className||''))&&/封面/.test(el.innerText||el.textContent||'')))()`);if(closed)break;await wait(.75)}if(!closed)return {ok:false,reason:'douyin cover dialog did not close after completion',slot:asset.slot}}else await wait(2);
+  for(let attempt=0;attempt<30&&!action;attempt+=1){action=await js(String.raw`((labels) => {const c=v=>String(v||'').replace(/\s+/g,' ').trim();const dialog=[...document.querySelectorAll('[role="dialog"]')].find(el=>!/animate-hide/.test(String(el.className||'')));const buttons=[...dialog?.querySelectorAll('button,[role="button"]')||[]];for(const label of labels){const button=buttons.find(el=>c(el.innerText||el.textContent||'')===label&&!el.disabled&&el.getAttribute('aria-disabled')!=='true'&&!/disabled/.test(String(el.className||'')));if(button){button.id='vp2-douyin-cover-advance';return{label,selector:'#'+button.id}}}return null})(${JSON.stringify(allowedLabels)})`);if(!action)await wait(.75)}
+  if(!action)return {ok:false,reason:`douyin ${allowedLabels.join(' or ')} button did not enable`,slot:asset.slot};try{await click(action.selector,{label:`douyin cover ${action.label}`})}catch(error){return {ok:false,reason:String(error?.message||error),slot:asset.slot}}
+  if(action.label==='完成'){let closed=false;for(let attempt=0;attempt<40;attempt+=1){closed=await js(String.raw`(() => ![...document.querySelectorAll('[role="dialog"]')].some(el=>!/animate-hide/.test(String(el.className||''))&&/封面/.test(el.innerText||el.textContent||'')))()`);if(closed)break;await wait(.75)}if(!closed)return {ok:false,reason:'douyin cover dialog did not close after completion',slot:asset.slot}}else {
+    let advanced=false;
+    for(let attempt=0;attempt<20;attempt+=1){
+      advanced=await js(String.raw`(() => [...document.querySelectorAll('[role="dialog"] [class*="step-active"]')].some(el=>/设置横封面/.test(el.innerText||el.textContent||'')))()`);
+      if(advanced)break;await wait(.5);
+    }
+    if(!advanced)return {ok:false,reason:'douyin cover did not advance to landscape',slot:asset.slot};
+  }
   return {ok:true,assetPath:asset.path,ratio:asset.ratio,completionLabel:action.label};
 }
 
@@ -493,8 +485,6 @@ async function ensureDouyinMetadata(before) {
       if (!added.ok) return { ok:false,actions,blocker:typedBlocker('ACTION_FAILED', added.reason, { evidence: added }) };
     }
   }
-  actions.settings = await turnOffDouyinSync();
-  if (!actions.settings.ok) return { ok:false,actions,blocker:typedBlocker('SELECTOR_DRIFT', actions.settings.reason) };
   return { ok:true,actions };
 }
 

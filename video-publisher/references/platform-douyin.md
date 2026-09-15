@@ -22,9 +22,9 @@ After a browser restart, refocus the rich description editor and verify `documen
 
 ## 上传期间提前填写
 
-抖音允许在视频仍显示“上传过程中”时编辑发布信息。生产流程先用 `upload_start` 注入或恢复视频；只有 fresh inspection 同时证明上传仍活跃、标题输入、描述编辑器、`#添加话题` 控件和同步发布设置均可用，才返回 `editable_uploading`。
+抖音允许在视频仍显示“上传过程中”时编辑发布信息。生产流程先用 `upload_start` 注入或恢复视频；只有 fresh inspection 同时证明上传仍活跃、标题输入、描述编辑器和 `#添加话题` 控件均可用，才返回 `editable_uploading`。
 
-随后由全局单宽 UI 队列执行 `prefill`，复用正式 mutation 的幂等标题、描述、话题和同步设置修复。`prefill` 不上传封面、不把 video gate 标为成功，也不执行 final verification。完成后正式 `upload` 必须继续等待“上传成功”稳定出现，之后才允许封面、剩余 mutation 和 verify。
+随后由全局单宽 UI 队列执行 `prefill`，复用正式 mutation 的幂等标题、描述和话题修复。`prefill` 不上传封面、不把 video gate 标为成功，也不执行 final verification。完成后正式 `upload` 必须继续等待“上传成功”稳定出现，之后才允许封面、剩余 mutation 和 verify。
 
 如果视频已开始但编辑控件未完整出现，返回 typed blocker，不猜测选择器；如果视频在排队期间已经完成，跳过提前路径并进入普通完成后流程。
 
@@ -46,9 +46,9 @@ Count only committed `[data-mention="#"]` or `[data-mention="activity"]` nodes a
 
 The description may truthfully contain a requested topic word such as `HTML` or `Vercel`. To detect plain topic residue, first remove committed entity nodes and the exact expected description prefix, then inspect only the remaining tail. Do not reject a correct description merely because its prose contains a topic word. An activity entity may render without a literal `#`; `data-mention="activity"` plus the exact visible entity label is valid page evidence.
 
-## Account Setting
+## 同步发布设置
 
-Select `不同时发布` for the simultaneous-publication setting unless the package explicitly authorizes cross-posting. Verify the selected radio state; do not infer it from a nearby Toutiao label.
+不读取或修改“同时发布 / 不同时发布”选项，不将其作为上传中提前填写、封面处理或 READY 的条件。账号之间可能没有该控件，不能因它缺失阻塞视频流程；也不要伪造已关闭同步的证据。
 
 ## Custom Covers
 
@@ -60,6 +60,8 @@ landscape 4:3
 ```
 
 Use the platform’s portrait upload, then `设置横封面`, then complete the landscape flow. Ignore stale hidden/leave-active dialogs.
+
+推进按钮使用当前编辑器内的唯一选择器，激活页面生命周期；点击“设置横封面”后必须等待活动步骤实际变为横封面，不能吞掉点击错误或仅固定等待后宣称切换完成。
 
 The main portrait and landscape cards must expose two distinct accepted URLs. A temporary mirrored URL in both cards is not success. Persist both receipts and require verify to match them.
 
@@ -75,7 +77,6 @@ correct draft identity
 video fully uploaded
 exact title and body
 the exact requested real topic entities, no residue or duplicates
-不同时发布 selected
 two distinct custom-cover receipts when enabled
 no blocking dialog
 visible enabled 发布 button

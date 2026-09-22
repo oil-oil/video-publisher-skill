@@ -5,7 +5,7 @@ Before changing the Xiaohongshu adapter, read `platform-common.md` and `ego-brow
 ## Account Defaults
 
 ```text
-short title, maximum 20 codepoints
+标题加权长度不超过 20：ASCII 字符计 0.5，其他 Unicode 字符计 1
 real topic entities only
 no prose body unless explicitly requested
 原创声明 enabled for original videos
@@ -50,9 +50,11 @@ After accepting the agreement, wait for Vue to enable `声明原创` before clic
 
 Default to the platform cover unless the package explicitly enables an existing-cover upload. Use the user-provided `3:4` asset.
 
-The current editor exposes a hover-only `.cover-edit-entry`. Pointer movement can remove that element before the click event completes, so this is a live-proven native-handler exception: invoke that exact entry’s page click handler before falling back to a stable preview click. Then poll for `.main-cover-editor-modal` and prefer its direct image input; the current editor may show only `上传` and `完成`, without a separate `上传封面` tab. Choose the crop ratio matching the asset when exposed and confirm the editor.
+The current editor exposes a hover-only `.cover-edit-entry`. Pointer movement can remove that element before the click event completes, so this is a live-proven native-handler exception: invoke that exact entry’s page click handler before falling back to a stable preview click. Then poll for `.main-cover-editor-modal` and prefer its direct image input; the current editor may show only `上传` and `完成`, without a separate `上传封面` tab. 上传后先打开左侧“裁剪”工具，再选择与资产匹配的 3:4。当前比例控件是 `.ratio-option`，必须回读其 `active` 状态；旧版控件按可见状态兼容。图片原始宽高、上传缩略图比例和预览框都不能证明实际裁剪比例。
 
-Accept the cover only when the main editor exposes the uploaded preview URL, normally on `ros-preview.xhscdn.com`, and no cover dialog blocks the page. Store that URL in the receipt and require the verify phase to find it again.
+仅操作当前可见的封面编辑器。在有限等待窗口内确认 3:4 已选中、“完成”或“确定”按钮可见且可用，才执行确认；按钮暂未就绪时等待状态变化，不立即判定素材被平台拒绝。选择器缺失、选中状态未持久化或确认失败，分别保留对应的类型化阻塞证据。
+
+Accept the cover only when the main editor exposes the uploaded preview URL, normally on `ros-preview.xhscdn.com`, and no cover dialog blocks the page. Store that URL in the receipt and require the verify phase to find it again. 回执同时保存实际裁剪成功的 `cropVerified` 标记；缺少该证明的历史回执不得直接满足封面检查。主页面 URL 已变化但编辑器仍打开、或仍在处理时，不生成成功回执。
 
 ## Required Gates
 

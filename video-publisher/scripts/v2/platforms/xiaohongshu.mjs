@@ -82,6 +82,7 @@ async function inspectXiaohongshu() {
   const receiptMatches = Boolean(receipt
     && receipt.assetPath === xhsCoverPath
     && receipt.ratio === '3:4'
+    && receipt.cropVerified === true
     && receipt.afterUrl
     && state.coverBg.includes(receipt.afterUrl));
   const coverOk = xhsCustomCover
@@ -353,6 +354,66 @@ async function ensureXhsOriginal() {
   return inspected.gates.original.ok ? { ok: true, control, modalResult } : { ok: false, reason: 'xiaohongshu original declaration did not persist', control, modalResult };
 }
 
+async function readXhsCoverCropState() {
+  return await js(String.raw`(() => {
+    const compact=value=>String(value||'').replace(/\s+/g,' ').trim()
+    const visible=el=>{if(!el)return false;const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>4&&r.height>4&&s.display!=='none'&&s.visibility!=='hidden'}
+    const active=el=>el?.getAttribute('aria-checked')==='true'||el?.getAttribute('aria-pressed')==='true'||String(el?.className||'').split(/\s+/).some(token=>['active','selected','checked'].includes(token))
+    const modal=[...document.querySelectorAll('.main-cover-editor-modal,.d-modal,[role="dialog"]')]
+      .find(el=>visible(el)&&(el.matches('.main-cover-editor-modal')||/设置封面/.test(compact(el.innerText||el.textContent||''))))
+    if(!modal)return {modal:false,reason:'xiaohongshu cover editor is not visible'}
+    const assign=(el,id)=>{if(!el)return '';el.id=id;return '#'+id}
+    const crop=[...modal.querySelectorAll('.items .item')].find(el=>visible(el)&&compact(el.innerText||el.textContent||'')==='裁剪')
+    const options=[...modal.querySelectorAll('.ratio-option,.crop-ratio-item')].filter(visible)
+    const selected=options.find(active)
+    const option=options.find(el=>compact(el.innerText||el.textContent||'')==='3:4')
+    const select=[...modal.querySelectorAll('.ratio-select')].find(visible)
+    const menuOption=[...document.querySelectorAll('.ratio-select-menu .ratio-item')].find(el=>visible(el)&&compact(el.innerText||el.textContent||'')==='3:4')
+    const actual=compact(selected?.innerText||selected?.textContent||select?.innerText||select?.textContent||'')
+    const button=[...modal.querySelectorAll('button')].find(el=>visible(el)&&/^(确定|完成)$/.test(compact(el.innerText||el.textContent||'')))
+    const enabled=Boolean(button&&!button.disabled&&button.getAttribute('aria-disabled')!=='true'&&!String(button.className||'').split(/\s+/).includes('disabled'))
+    return {
+      modal:true,
+      cropSelector:crop&&!active(crop)?assign(crop,'vp2-xhs-crop-tool'):'',
+      actualRatio:actual,
+      optionSelector:assign(option||menuOption,'vp2-xhs-ratio-3x4'),
+      selectSelector:assign(select,'vp2-xhs-ratio-select'),
+      confirm:enabled?{selector:assign(button,'vp2-xhs-cover-confirm'),text:compact(button.innerText||button.textContent||'')}:null,
+    }
+  })()`);
+}
+
+async function prepareXhsCoverConfirmation() {
+  const dispatched = new Set();
+  let state = {};
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    state = await readXhsCoverCropState();
+    let selector = '';
+    let label = '';
+    if (state.cropSelector) {
+      selector = state.cropSelector;
+      label = 'open xhs cover crop controls';
+    } else if (state.actualRatio !== '3:4') {
+      selector = state.optionSelector || state.selectSelector || '';
+      label = state.optionSelector ? 'select xhs 3:4 cover ratio' : 'open xhs cover ratio selector';
+    } else if (state.confirm) {
+      return { ok: true, actualRatio: state.actualRatio, confirm: state.confirm };
+    }
+    if (selector && !dispatched.has(selector)) {
+      try { await click(selector, { label }); }
+      catch (error) { return { ok: false, code: 'ACTION_FAILED', reason: `xiaohongshu crop control click failed: ${String(error?.message || error)}`, evidence: state }; }
+      dispatched.add(selector);
+    }
+    await wait(0.5);
+  }
+  return {
+    ok: false,
+    code: state.actualRatio === '3:4' ? 'ACTION_FAILED' : 'SELECTOR_DRIFT',
+    reason: state.actualRatio === '3:4' ? 'xiaohongshu cover confirm remained missing or disabled' : 'xiaohongshu 3:4 crop selection was not verified',
+    evidence: state,
+  };
+}
+
 async function uploadXhsCover() {
   if (!xhsCustomCover) return { ok: true, skipped: true };
   const before = await js(String.raw`(() => { const el=document.querySelector('.cover-plugin-preview .default.row, .cover-plugin-preview .default.column'); return el ? getComputedStyle(el).backgroundImage : '' })()`);
@@ -487,70 +548,29 @@ async function uploadXhsCover() {
     try { await uploadFile(exposed.selector, xhsCoverPath); } catch (error) { return { ok: false, reason: String(error?.message || error) }; }
     await wait(2);
   }
-  let ratio = await js(String.raw`(() => {
-    const item=[...document.querySelectorAll('.crop-ratio-item')].find(el=>String(el.innerText||el.textContent||'').replace(/\s+/g,' ').trim()==='3:4')
-    if(!item)return {ok:false,reason:'legacy-ratio-control-missing'}
-    item.click(); return {ok:true,className:String(item.className||'')}
-  })()`);
-  if (!ratio.ok) {
-    const ratioControl = await js(String.raw`(() => {
-      const compact=value=>String(value||'').replace(/\s+/g,' ').trim()
-      const modal=[...document.querySelectorAll('.main-cover-editor-modal,.d-modal,[role="dialog"]')]
-        .find(el=>el.matches('.main-cover-editor-modal')||/设置封面/.test(compact(el.innerText||el.textContent||'')))
-      const item=modal?.querySelector('.ratio-select')
-      if(!item){
-        const uploaded=[...modal?.querySelectorAll('.uploaded-thumbnail-img')||[]].find(el=>el.naturalWidth>0&&el.naturalHeight>0)
-        const actualRatio=uploaded?uploaded.naturalWidth/uploaded.naturalHeight:0
-        if(uploaded&&Math.abs(actualRatio-0.75)<0.01)return {ok:true,already:true,inferredFromUploadedThumbnail:true,actual:'3:4',width:uploaded.naturalWidth,height:uploaded.naturalHeight}
-        return {ok:false,reason:'xiaohongshu ratio selector missing',uploadedThumbnail:uploaded?{width:uploaded.naturalWidth,height:uploaded.naturalHeight}:null}
-      }
-      if(String(item.innerText||item.textContent||'').replace(/\s+/g,' ').trim()==='3:4')return {ok:true,already:true}
-      item.id='vp2-xhs-ratio-select';return {ok:true,selector:'#vp2-xhs-ratio-select'}
-    })()`);
-    if (!ratioControl.ok) return ratioControl;
-    if (!ratioControl.already) {
-      try { await click(ratioControl.selector, { label: 'open xhs cover ratio selector' }); } catch (error) { return { ok: false, reason: `xiaohongshu ratio selector click failed: ${String(error?.message || error)}` }; }
-      await wait(0.5);
-      const ratioItem = await js(String.raw`(() => {
-        const item=[...document.querySelectorAll('.ratio-select-menu .ratio-item')].find(el=>String(el.innerText||el.textContent||'').replace(/\s+/g,' ').trim()==='3:4')
-        if(!item)return {ok:false,reason:'xiaohongshu 3:4 ratio option missing'}
-        item.id='vp2-xhs-ratio-3x4';return {ok:true,selector:'#vp2-xhs-ratio-3x4'}
-      })()`);
-      if (!ratioItem.ok) return ratioItem;
-      try { await click(ratioItem.selector, { label: 'select xhs 3:4 cover ratio' }); } catch (error) { return { ok: false, reason: `xiaohongshu 3:4 ratio click failed: ${String(error?.message || error)}` }; }
-      await wait(0.5);
-    }
-    ratio = ratioControl.inferredFromUploadedThumbnail
-      ? ratioControl
-      : await js(String.raw`(() => {
-        const modal=[...document.querySelectorAll('.main-cover-editor-modal,.d-modal,[role="dialog"]')].find(el=>el.matches('.main-cover-editor-modal')||/设置封面/.test(el.innerText||el.textContent||''))
-        const actual=String(modal?.querySelector('.ratio-select')?.innerText||modal?.querySelector('.ratio-select')?.textContent||'').replace(/\s+/g,' ').trim()
-        return actual==='3:4'?{ok:true,actual}:{ok:false,reason:'xiaohongshu 3:4 ratio did not persist',actual}
-      })()`);
-  }
-  if (!ratio.ok) return ratio;
-  await wait(1);
-  const confirmed = await js(String.raw`(() => {
-    const compact=value=>String(value||'').replace(/\s+/g,' ').trim()
-    const visible=el=>{if(!el)return false;const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>10&&r.height>10&&s.display!=='none'&&s.visibility!=='hidden'}
-    const modal=[...document.querySelectorAll('.main-cover-editor-modal,.d-modal,[role="dialog"]')]
-      .find(el=>(el.matches('.main-cover-editor-modal')||/设置封面/.test(compact(el.innerText||el.textContent||'')))&&visible(el))
-    const button=[...(modal?.querySelectorAll('button')||[])].find(el=>/^(确定|完成)$/.test(compact(el.innerText||el.textContent||''))&&!el.disabled&&visible(el))
-    if(!button)return {ok:false,reason:'xiaohongshu cover confirm missing or disabled'}
-    button.click(); return {ok:true}
-  })()`);
-  if (!confirmed.ok) return confirmed;
+  const prepared = await prepareXhsCoverConfirmation();
+  if (!prepared.ok) return prepared;
+  try { await click(prepared.confirm.selector, { label: 'confirm xhs cover crop' }); }
+  catch (error) { return { ok: false, code: 'ACTION_FAILED', reason: `xiaohongshu cover confirmation failed: ${String(error?.message || error)}` }; }
   let after = '';
+  let accepted = false;
   for (let index = 0; index < 60; index += 1) {
-    const current = await js(String.raw`(() => { const el=document.querySelector('.cover-plugin-preview .default.row, .cover-plugin-preview .default.column'); const text=document.body.innerText||''; return {bg:el?getComputedStyle(el).backgroundImage:'',uploading:/封面上传中|正在上传|处理中/.test(text)} })()`);
+    const current = await js(String.raw`(() => {
+      const el=document.querySelector('.cover-plugin-preview .default.row, .cover-plugin-preview .default.column')
+      const text=document.body.innerText||''
+      const visible=node=>{const r=node.getBoundingClientRect(),s=getComputedStyle(node);return r.width>4&&r.height>4&&s.display!=='none'&&s.visibility!=='hidden'}
+      const editorOpen=[...document.querySelectorAll('.main-cover-editor-modal,.d-modal,[role="dialog"]')]
+        .some(node=>visible(node)&&(node.matches('.main-cover-editor-modal')||/设置封面/.test(node.innerText||node.textContent||'')))
+      return {bg:el?getComputedStyle(el).backgroundImage:'',uploading:/封面上传中|正在上传|处理中/.test(text),editorOpen}
+    })()`);
     after = current.bg;
-    if (after && after !== before && !current.uploading) break;
+    if (after && after !== before && !current.uploading && !current.editorOpen) { accepted = true; break; }
     await wait(2);
   }
   await removeExactStaleMask(/设置封面/);
-  if (!after || after === before) return { ok: false, reason: 'xiaohongshu cover preview did not change', before, after };
+  if (!accepted) return { ok: false, code: 'ACTION_FAILED', reason: 'xiaohongshu cover was not accepted or editor did not close', before, after };
   const url = (after.match(/url\(["']?([^"')]+)/) || [])[1] || after;
-  return { ok: true, receipt: { assetPath: xhsCoverPath, ratio: '3:4', beforeUrl: before, afterUrl: url } };
+  return { ok: true, receipt: { assetPath: xhsCoverPath, ratio: '3:4', cropVerified: prepared.actualRatio === '3:4', beforeUrl: before, afterUrl: url } };
 }
 
 async function ensureXiaohongshuEarlyMetadata(before) {
@@ -595,7 +615,7 @@ async function mutateXiaohongshu() {
   actions.original = await ensureXhsOriginal();
   if (!actions.original.ok) return { ...(await inspectXiaohongshu()), blocker: typedBlocker('ACTION_FAILED', actions.original.reason, { evidence: actions.original }) };
   actions.cover = await uploadXhsCover();
-  if (!actions.cover.ok) return { ...(await inspectXiaohongshu()), blocker: typedBlocker('PLATFORM_REJECTED_ASSET', actions.cover.reason, { retryable: true, evidence: actions.cover }) };
+  if (!actions.cover.ok) return { ...(await inspectXiaohongshu()), blocker: typedBlocker(actions.cover.code || 'PLATFORM_REJECTED_ASSET', actions.cover.reason, { retryable: true, evidence: actions.cover }) };
   const receipts = actions.cover.receipt ? { cover: actions.cover.receipt } : {};
   actions.receiptCheckpoint = checkpointReceipts(receipts);
   const previousReceipts = expectedReceipts;

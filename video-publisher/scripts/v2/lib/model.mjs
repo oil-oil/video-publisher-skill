@@ -21,7 +21,7 @@ const REQUIRED_GATES = Object.freeze({
   ],
   douyin: [
     "authenticated", "draftIdentity", "video", "title", "description", "tags",
-    "settings", "cover", "noBlockingDialog", "finalButton", "safety",
+    "cover", "noBlockingDialog", "finalButton", "safety",
   ],
   bilibili: [
     "authenticated", "draftIdentity", "video", "title", "description", "tags",

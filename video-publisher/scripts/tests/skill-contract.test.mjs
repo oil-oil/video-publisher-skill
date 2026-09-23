@@ -17,7 +17,9 @@ test("主入口保持精简并保留发布安全边界", () => {
   assert.ok(lineCount <= 110, `SKILL.md 过长：${lineCount}/110 行`);
   assert.ok(Buffer.byteLength(skill) <= 10_000, `SKILL.md 过大：${Buffer.byteLength(skill)}/10000 bytes`);
   assert.match(skill, /scripts\/run-safe-platforms\.sh <package\.json>/);
-  assert.match(skill, /不点击任何平台的最终发布、保存或定时发布按钮/);
+  assert.match(skill, /准备草稿和验收期间不点击最终发布、保存或定时发布按钮/);
+  assert.match(skill, /只有用户在当前任务明确要求将已确认的内容发布到具体平台/);
+  assert.match(skill, /releaseForConfirmedPublish/);
   assert.match(skill, /--confirm-original-rights/);
   assert.match(skill, /--no-cleanup-stale-spaces/);
   assert.match(skill, /部分平台/);

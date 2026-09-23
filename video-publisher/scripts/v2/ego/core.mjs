@@ -99,6 +99,12 @@ async function armFinalPublishGuard() {
     const finalText = new RegExp(finalSource, finalFlags)
     const compact = value => String(value || '').replace(/\s+/g, ' ').trim()
     const state = { armed: true, version: 1, armedAt: new Date().toISOString(), blockedAttempts: [] }
+    state.releaseForConfirmedPublish = () => {
+      if (!state.armed || state.blockedAttempts.length) return { ok: false, reason: 'guard not clean and armed' }
+      state.armed = false
+      state.releasedAt = new Date().toISOString()
+      return { ok: true, releasedAt: state.releasedAt }
+    }
     const buttonLabel = element => {
       if (!(element instanceof Element)) return ''
       const buttonish = element.matches('button, input[type="submit"], [role="button"], .d-button, .bcc-button')
@@ -106,6 +112,7 @@ async function armFinalPublishGuard() {
       return compact(element.value || element.getAttribute('aria-label') || element.innerText || element.textContent || '')
     }
     const guard = event => {
+      if (!state.armed) return
       const candidates = [event.submitter, ...(typeof event.composedPath === 'function' ? event.composedPath() : []), event.target]
       const match = candidates.map(element => ({ element, label: buttonLabel(element) })).find(item => finalText.test(item.label))
       if (!match) return

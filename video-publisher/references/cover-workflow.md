@@ -33,7 +33,7 @@ B站首页主封面：4:3，至少 1200 × 900
 ```text
 小红书：vertical3x4Path
 抖音：vertical3x4Path + horizontal4x3Path
-B站：horizontal4x3Path
+B站：horizontal4x3Path + horizontal16x9Path
 视频号：vertical3x4Path + horizontal4x3Path
 YouTube：horizontal16x9Path
 ```
@@ -45,6 +45,7 @@ YouTube：horizontal16x9Path
   "cover": {
     "uploadCustomCover": true,
     "horizontal4x3Path": "/absolute/path/shared-4x3.png",
+    "horizontal16x9Path": "/absolute/path/shared-16x9.png",
     "platforms": {
       "bilibili": {
         "horizontal4x3Path": "/absolute/path/new-bilibili-4x3.png"
@@ -54,7 +55,7 @@ YouTube：horizontal16x9Path
 }
 ```
 
-oil-cover 产出的 `<视频名>_4x3.png` 对应 B站 `horizontal4x3Path`；编辑器可将该首页 4:3 主封面同步到个人空间 16:9 槽。
+oil-cover 产出的 `_4x3.png` 和 `_16x9.png` 分别上传 B站首页推荐槽和个人空间槽。关闭双比例同步改动，两槽分别记录真实选中文件和平台接受回执；同步裁剪不能代替上传对应文件。
 
 平台专用路径优先于共享路径；校验、身份摘要和实际上传必须解析为同一文件。回归时要检查传给适配器的路径，不能只验证内容包映射。
 
@@ -80,7 +81,7 @@ oil-cover 产出的 `<视频名>_4x3.png` 对应 B站 `horizontal4x3Path`；编�
 ```text
 小红书：主预览通常来自 ros-preview.xhscdn.com。
 抖音：竖版和横版主卡片必须得到两个不同的接受 URL。
-B站：编辑器关闭，主 `.cover-img` 来自 archive.biliimg.com 或 biliimg.com。
+B站：编辑器关闭，4:3 与 16:9 两个槽分别有绑定源文件的 CDN 回执，独立验证两槽。
 视频号：3:4 与 4:3 主卡片 URL 都要变化，两个编辑器都关闭，并通过独立验证；忽略 data URL 裁剪预览和手机镜像。
 YouTube：接受的 16:9 缩略图必须是绑定当前 videoId 的服务端 URL；blob、data 或本地预览不足。
 ```

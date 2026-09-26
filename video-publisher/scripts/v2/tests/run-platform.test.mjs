@@ -27,16 +27,21 @@ test("platform runner sends the platform cover override to the adapter", async (
     const scriptPath = path.join(root, "generated-script.mjs");
     const fakeEgoPath = path.join(root, "fake-ego");
     const sharedPath = path.join(root, "shared.png");
+    const personalSpacePath = path.join(root, "personal-space.png");
     const overridePath = path.join(root, "override.png");
     const png = Buffer.alloc(24);
     png[0] = 0x89; png.write("PNG", 1, "ascii");
     png.writeUInt32BE(1440, 16); png.writeUInt32BE(1080, 20);
+    const personalSpacePng = Buffer.alloc(24);
+    personalSpacePng[0] = 0x89; personalSpacePng.write("PNG", 1, "ascii");
+    personalSpacePng.writeUInt32BE(1280, 16); personalSpacePng.writeUInt32BE(720, 20);
     await fs.promises.writeFile(sharedPath, png);
+    await fs.promises.writeFile(personalSpacePath, personalSpacePng);
     await fs.promises.writeFile(overridePath, png);
     await fs.promises.writeFile(videoPath, mp4WithDuration(30));
     await fs.promises.writeFile(packagePath, JSON.stringify({
       videoPath, title: "封面覆盖", bilibiliDescription: "说明", bilibiliTags: ["测试"],
-      cover: { uploadCustomCover: true, horizontal4x3Path: sharedPath,
+      cover: { uploadCustomCover: true, horizontal4x3Path: sharedPath, horizontal16x9Path: personalSpacePath,
         platforms: { bilibili: { horizontal4x3Path: overridePath } } },
     }));
     await fs.promises.writeFile(configPath, JSON.stringify({
@@ -52,6 +57,7 @@ test("platform runner sends the platform cover override to the adapter", async (
     const script = await fs.promises.readFile(scriptPath, "utf8");
     const adapterPackage = JSON.parse(script.match(/^const pkg = (.+);$/m)[1]);
     assert.equal(adapterPackage.cover.horizontal4x3Path, overridePath);
+    assert.equal(adapterPackage.cover.horizontal16x9Path, personalSpacePath);
   } finally {
     await fs.promises.rm(root, { recursive: true, force: true });
   }

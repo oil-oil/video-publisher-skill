@@ -78,21 +78,21 @@ The adapter must verify the checked state after the dialog closes.
 
 ## Custom Cover
 
-When enabled, upload both user-provided assets. Use the same flow first for the personal-profile `3:4` card and then for the share-card `4:3` card:
+When enabled, inspect the live cover controls. The older editor has separate personal-profile `3:4` and share-card `4:3` cards; upload both assets there. The newer editor labels one card `个人主页和分享卡片(3:4)` and has no horizontal card; upload and verify the `3:4` asset once for that unified card. Never search for or synthesize a missing `4:3` control. Use this flow for each available card:
 
 1. Click `.vertical-cover-wrap .edit-btn` for 3:4 or `.horizon-cover-wrap .edit-btn` for 4:3.
-2. In the active edit-cover dialog, locate its existing image file input across open roots.
+2. If a material popover appears, use its unique visible `直接编辑` control to enter the editor. Match the parent dialog by its own heading, excluding nested crop-dialog inputs and buttons.
 3. Inject the file through its CDP object id; top-document `uploadFile` cannot reach it.
-4. Wait for `.single-cover-uploader-wrap img` to show a real preview.
+4. Require the native FileList to match this slot’s filename and size. Wait for a new, fully loaded `.single-cover-uploader-wrap img` with the slot’s actual intrinsic ratio.
 5. If `裁剪封面图` is visible, click its visible `确定` first.
 6. Wait for the parent editor to become visible, then click its visible `确认`.
-7. On the share-card path, handle the intermediate `使用此素材` confirmation before the parent `确认` control.
+7. Keep crop confirmation scoped to the crop dialog and parent confirmation scoped to the matched parent editor.
 8. Keep the lifecycle active until the editor closes and the corresponding main-card CDN URL changes.
-9. Persist each URL with its absolute asset path and ratio, then require a separate verify process to find both again.
+9. Persist each URL with its asset path, native file metadata, loaded preview proof and accepted card dimensions. Independently verify each slot; on retry, skip only slots whose fresh card still matches their receipt.
 
 The slot-specific titles `编辑个人主页卡片` and `编辑分享卡片` remain preferred. A current page variant can instead expose the same active editor as `编辑封面`; accept that fallback only when the unique visible dialog also contains `上传封面`, `取消`, and `确认`. Recovery, image-input lookup, and confirmation must search visible `.weui-desktop-dialog__wrp` roots directly instead of depending on the removed `.edit-cover-dialog` ancestor.
 
-Only `.vertical-cover-wrap img.vertical-img-size` and `.horizon-cover-wrap img.horizon-img-size` are receipt targets. Require separate `3:4` and `4:3` receipts.
+Only `.vertical-cover-wrap img.vertical-img-size` and, when present, `.horizon-cover-wrap img.horizon-img-size` are receipt targets. Require separate `3:4` and `4:3` receipts only when the page exposes separate cards. The unified card requires its verified `3:4` receipt.
 
 If a prior attempt leaves `编辑个人主页卡片` or `裁剪封面图` open, safely cancel that known editor, wait for it to close, and retry once. Do not misclassify an unrelated cover dialog as an original-declaration failure.
 

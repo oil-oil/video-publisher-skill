@@ -70,3 +70,5 @@ final publish not clicked
 ```
 
 实测记录和待回归边界见 `acceptance-history.md`。
+
+Cover acceptance requires the actual visible crop control to read `3:4` (including the current `button.ratio-option.active` variant), the native selected file metadata, and a loaded accepted CDN image with intrinsic 3:4 dimensions. An uploaded 3:4 thumbnail does not prove the crop selection. On restore without a verified receipt, clear the known uploaded thumbnail if necessary to expose the real upload input and re-upload the exact file.

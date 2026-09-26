@@ -69,7 +69,7 @@ test("Xiaohongshu prefill requires live title and topic controls and defers righ
   assert.doesNotMatch(prefill, /ensureXhsOriginal|uploadXhsCover/);
 });
 
-test("Xiaohongshu cover repair supports the current upload editor labels", () => {
+test("Xiaohongshu cover repair resumes by reselecting the requested source asset", () => {
   const source = fs.readFileSync(path.join(PLATFORM_DIR, "xiaohongshu.mjs"), "utf8");
   const start = source.indexOf("async function uploadXhsCover");
   const end = source.indexOf("async function ensureXiaohongshuEarlyMetadata", start);
@@ -82,9 +82,13 @@ test("Xiaohongshu cover repair supports the current upload editor labels", () =>
   assert.match(coverFlow, /openedAfterRealClick/, "the cover opener must verify that the asynchronous editor materialized");
   assert.match(coverFlow, /native fallback/, "a missing asynchronous editor must retry through the page's native click handler");
   assert.match(coverFlow, /resume-uploaded-thumbnail/, "a retry must resume a cover that already reached the editor");
-  assert.match(coverFlow, /if \(!tab\.alreadyUploaded\)/, "a resumed cover must not be uploaded twice");
-  assert.match(coverFlow, /inferredFromUploadedThumbnail/, "the fixed-ratio editor must prove 3:4 from its uploaded thumbnail");
-  assert.match(coverFlow, /Math\.abs\(actualRatio-0\.75\)<0\.01/, "the inferred ratio must stay tightly bound to 3:4");
+  assert.match(coverFlow, /uploaded-thumbnail-clear/, "a resumed thumbnail must be cleared before selecting the requested source");
+  assert.doesNotMatch(coverFlow, /if \(!tab\.alreadyUploaded\)/, "the requested source file must be proven on every repair");
+  assert.match(coverFlow, /selectedFile\?\.name!==path\.basename\(xhsCoverPath\)/);
+  assert.match(coverFlow, /const cropProof=await js/, "the crop ratio must be re-read from the live editor before confirmation");
+  assert.match(coverFlow, /xhsCoverCropMatches\(cropProof\)/, "the selected ratio control must prove the requested 3:4 crop");
+  assert.match(coverFlow, /controlVisible/);
+  assert.doesNotMatch(coverFlow, /inferredFromUploadedThumbnail|uploadedThumbnail/, "source-image dimensions cannot substitute for crop-control evidence");
 });
 
 test("Xiaohongshu original declaration never treats unchecked as checked", () => {
@@ -145,10 +149,17 @@ test("WeChat Channels cover flow supports both slot-specific and generic editors
   const start = source.indexOf("async function dismissWechatCoverEditor");
   const end = source.indexOf("async function ensureWechatEarlyMetadata", start);
   const coverFlow = source.slice(start, end);
+  const helperStart = source.indexOf("function wechatCoverEditorExpression");
+  const helperEnd = source.indexOf("async function probeWechatCoverEditor", helperStart);
+  assert.ok(helperStart >= 0 && helperEnd > helperStart, "the shared editor probe must remain discoverable");
+  const editorProbe = source.slice(helperStart, helperEnd);
   assert.match(coverFlow, /编辑个人主页卡片\|编辑分享卡片\|编辑封面\|裁剪封面图/, "recovery must recognize every live cover-dialog title");
   assert.match(coverFlow, /querySelectorAll\('\.weui-desktop-dialog__wrp'\)/, "cover lookup must not depend on the removed edit-cover-dialog ancestor");
-  assert.match(coverFlow, /dialogs\.find\(el=>String\(el\.innerText\|\|el\.textContent\|\|'\'\)\.includes\(title\)\)\|\|dialogs\.find/, "the exact slot title remains preferred before the generic fallback");
-  assert.match(coverFlow, /\/编辑封面\/\.test\(text\)&&\/上传封面\/\.test\(text\)&&\/取消\/\.test\(text\)&&\/确认\/\.test\(text\)/, "the generic fallback must still prove a complete cover editor");
+  assert.match(editorProbe, /heading\(d\)===title/, "the exact slot title remains preferred");
+  assert.match(editorProbe, /heading\(d\)==='编辑封面'/, "the current generic editor title remains a fallback");
+  assert.match(editorProbe, /candidates=exact\.length\?exact:dialogs\.filter/);
+  assert.match(editorProbe, /owned=\(dialog,selector\)=>/, "child controls must be scoped to the matched editor");
+  assert.match(coverFlow, /owned\(editor,'input\[type=file\]'\)/, "file injection requires an input owned by the matched editor");
 });
 
 test("Ego task-space selection rejects a recycled id with another name", () => {
@@ -197,14 +208,33 @@ test("Bilibili cover repair continues after a rejected tag and preserves the blo
   assert.doesNotMatch(mutation.slice(tagFailure, coverRepair), /return /, "tag rejection must not return before cover repair");
 });
 
-test("Bilibili uses the 4:3 homepage master and receipt ratio", () => {
+test("Bilibili keeps homepage and personal-space cover verification independent", () => {
   const source = fs.readFileSync(path.join(PLATFORM_DIR, "bilibili.mjs"), "utf8");
-  assert.match(source, /pkg\.cover\?\.horizontal4x3Path/);
-  assert.match(source, /添加主封面\|添加封面/, "cover entry repair must support the current 添加封面 label");
-  assert.match(source, /receipt\.ratio==='4:3'/);
-  assert.match(source, /ratio:'4:3'/);
-  assert.match(source, /slots:\['homepage-4:3','space-16:9'\]/);
-  assert.doesNotMatch(source, /pkg\.cover\?\.horizontal16x9Path/);
+  assert.match(source, /const bilibiliCoverAssets = \[/);
+  assert.match(source, /slot:'homepage-master',ratio:'4:3'/);
+  assert.match(source, /slot:'personal-space',ratio:'16:9'/);
+  assert.match(source, /editor:'#editor_4_3',key:'extra'/);
+  assert.match(source, /editor:'#editor_16_9',key:'main'/);
+  assert.match(source, /bilibiliCoverReceiptMatches\(asset,receipt\?\.slots\?\.\[asset\.slot\]/);
+  assert.match(source, /bilibiliCoverAssets\.every\(asset=>bilibiliCoverReceiptMatches\(asset,receipt\?\.slots\?\.\[asset\.slot\],imagesBySlot\[asset\.slot\]\)\)/, "READY requires current live proof for both slots");
+  assert.doesNotMatch(source, /slots:\['homepage-4:3','space-16:9'\]/, "one 4:3 upload cannot claim both slots");
+
+  assert.match(source, /sync-checkbox input\[type=checkbox\]/);
+  assert.match(source, /inputs\.every\(i=>!i\.checked\)/, "both sync controls must stay unchecked");
+  assert.match(source, /previewProof\?\.changed&&previewProof\.active&&previewProof\.loaded/, "upload completion requires a new loaded preview in the active slot");
+  assert.match(source, /image\.source==='upload'/, "accepted images must come from the upload flow");
+  assert.match(source, /image\.origin===receipt\.previewProof\.url/, "the accepted image must originate from the selected preview");
+  assert.match(source, /receipt\.slots\[asset\.slot\]=result\.receipt/);
+  assert.match(source, /checkpointReceipts\(\{\.\.\.expectedReceipts,cover:receipt\}\)/, "each successful slot must be checkpointed for recovery");
+  assert.match(source, /if\(bilibiliCoverReceiptMatches\(asset,receipt\.slots\[asset\.slot\],images\[asset\.slot\]\)\)continue/, "a verified earlier slot must survive a retry without another upload");
+  assert.match(source, /const accepted=bilibiliCoverAssets\.every\(asset=>bilibiliCoverReceiptMatches/);
+  assert.match(source, /if\(closed&&accepted\)/, "final confirmation requires both live slot proofs and a closed editor");
+  assert.match(source, /不同步，手动编辑/, "the sync warning must be recovered through the manual-edit path");
+  assert.doesNotMatch(source, /确认同步/, "the adapter must never merge the two cover slots");
+
+  assert.match(source, /item\.extra\?\.edited===cardUrl/, "the visible primary card URL must bind to one cover-list item");
+  assert.match(source, /matches\.length===1\?matches\[0\]:null/, "ambiguous ownership must fail closed");
+  assert.match(source, /personal-space':image\(item\?\.main\)/, "the 16:9 slot is checked against the main URL, not a PK cover");
 });
 
 test("WeChat Channels refuses an unproven uploaded draft with an empty description", () => {

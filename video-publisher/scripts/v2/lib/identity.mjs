@@ -53,7 +53,7 @@ export async function buildIdentity(pkg) {
   const coverFingerprints = {
     xiaohongshu: digest({ enabled: cover.uploadCustomCover, vertical: platformAsset("xiaohongshu", "vertical3x4Path") }),
     douyin: digest({ enabled: cover.uploadCustomCover, vertical: platformAsset("douyin", "vertical3x4Path"), horizontal: platformAsset("douyin", "horizontal4x3Path") }),
-    bilibili: digest({ enabled: cover.uploadCustomCover, horizontal: platformAsset("bilibili", "horizontal4x3Path") }),
+    bilibili: digest({ enabled: cover.uploadCustomCover, horizontal: platformAsset("bilibili", "horizontal4x3Path"), space: platformAsset("bilibili", "horizontal16x9Path") }),
     wechat_channels: digest({ enabled: cover.uploadCustomCover, vertical: platformAsset("wechat_channels", "vertical3x4Path"), horizontal: platformAsset("wechat_channels", "horizontal4x3Path") }),
     youtube: digest({ enabled: cover.uploadCustomCover, horizontal: platformAsset("youtube", "horizontal16x9Path") }),
   };

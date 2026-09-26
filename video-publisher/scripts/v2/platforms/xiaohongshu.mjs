@@ -4,6 +4,49 @@ const xhsVideoName = videoPath.split('/').pop();
 const xhsCustomCover = pkg.cover?.uploadCustomCover === true;
 const xhsCoverPath = String(pkg.cover?.vertical3x4Path || '');
 
+function xhsCoverCropMatches(probe) {
+  return probe?.actual === '3:4' && probe?.controlVisible === true;
+}
+
+function xhsCoverReceiptMatches(receipt, background) {
+  return Boolean(receipt && receipt.assetPath === xhsCoverPath && receipt.ratio === '3:4'
+    && receipt.selectedFile?.name === path.basename(xhsCoverPath)
+    && receipt.selectedFile?.size === fs.statSync(xhsCoverPath).size
+    && xhsCoverCropMatches(receipt.cropProof)
+    && receipt.acceptedImage?.width > 0 && receipt.acceptedImage?.height > 0
+    && Math.abs(receipt.acceptedImage.width / receipt.acceptedImage.height - 0.75) < 0.01
+    && receipt.afterUrl && background.includes(receipt.afterUrl));
+}
+
+async function activateXhsCropPanel() {
+  const target = await js(String.raw`(() => {
+    const compact=v=>String(v||'').replace(/\s+/g,' ').trim();
+    const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return r.width>4&&r.height>4&&s.display!=='none'&&s.visibility!=='hidden'};
+    const modal=[...document.querySelectorAll('.main-cover-editor-modal,.d-modal,[role="dialog"]')].find(e=>visible(e)&&/设置封面/.test(compact(e.innerText||e.textContent)));
+    if(!modal)return {ok:false,reason:'xiaohongshu cover editor missing'};
+    const item=[...modal.querySelectorAll('button,[role="tab"],div,span')].filter(e=>visible(e)&&compact(e.innerText||e.textContent)==='裁剪').sort((a,b)=>{const ar=a.getBoundingClientRect(),br=b.getBoundingClientRect();return ar.width*ar.height-br.width*br.height})[0];
+    if(!item)return {ok:!!modal.querySelector('.ratio-select'),already:true};
+    item.id='vp2-xhs-crop-panel';return {ok:true,selector:'#vp2-xhs-crop-panel'};
+  })()`);
+  if(!target.ok)return target;
+  if(target.selector)await click(target.selector,{label:'activate xhs crop panel'});
+  await wait(0.5);
+  return {ok:true};
+}
+
+async function readXhsAcceptedImage(url) {
+  for(let attempt=0;attempt<12;attempt+=1){
+    const image=await js(String.raw`((url) => {
+      const cache=window.__VP2_XHS_IMAGE_DIMENSIONS__||(window.__VP2_XHS_IMAGE_DIMENSIONS__={});
+      if(!cache[url]){const item={loaded:false};cache[url]=item;const image=new Image();image.onload=()=>Object.assign(item,{loaded:true,width:image.naturalWidth,height:image.naturalHeight});image.onerror=()=>Object.assign(item,{failed:true});image.src=url;}
+      return cache[url];
+    })(${JSON.stringify(url)})`);
+    if(image.loaded||image.failed)return image;
+    await wait(0.5);
+  }
+  return {loaded:false};
+}
+
 async function inspectXiaohongshu() {
   const state = await js(String.raw`((expectedName, expectedTitle, requestedTopics) => {
     const compact = value => String(value || '').replace(/\s+/g, ' ').trim()
@@ -79,11 +122,7 @@ async function inspectXiaohongshu() {
   const buttons = await inspectFinalButtons(/^(发布|发布笔记)$/);
   const identityOk = !state.uploaded || state.filenameVisible || state.title === xhsTitle;
   const receipt = expectedReceipts.cover || null;
-  const receiptMatches = Boolean(receipt
-    && receipt.assetPath === xhsCoverPath
-    && receipt.ratio === '3:4'
-    && receipt.afterUrl
-    && state.coverBg.includes(receipt.afterUrl));
+  const receiptMatches = xhsCoverReceiptMatches(receipt,state.coverBg);
   const coverOk = xhsCustomCover
     ? receiptMatches && !state.uploading
     : Boolean(state.coverBg) && !state.uploading;
@@ -476,18 +515,41 @@ async function uploadXhsCover() {
     })()`);
     return { ...tab, diagnostics };
   }
-  if (!tab.alreadyUploaded) {
+  const cropPanel=await activateXhsCropPanel();
+  if(!cropPanel.ok)return {ok:false,reason:'xiaohongshu crop panel could not be activated',cropPanel};
+  // Capture the native selection before a framework may reset its file input.
+  let selectedFile=null;
+  {
     await wait(1);
-    const exposed = await js(String.raw`(() => {
-      const input=[...document.querySelectorAll('input[type=file]')].find(el=>/image|png|jpe?g/i.test(el.accept||''))
-      if(!input)return {ok:false,reason:'xiaohongshu cover input missing'}
+    const exposeInput = async () => await js(String.raw`(() => {
+      const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return r.width>10&&r.height>10&&s.display!=='none'&&s.visibility!=='hidden'}
+      const modal=[...document.querySelectorAll('.main-cover-editor-modal,.d-modal,[role="dialog"]')].find(e=>visible(e)&&/设置封面/.test(e.innerText||e.textContent||''))
+      let inputs=[...(modal?.querySelectorAll('input[type=file]')||[])].filter(el=>/image|png|jpe?g/i.test(el.accept||''))
+      if(!modal)return {ok:false,reason:'xiaohongshu active cover editor missing'}
+      if(!inputs.length)inputs=[...document.querySelectorAll('input[type=file]')].filter(el=>/image|png|jpe?g/i.test(el.accept||''))
+      if(inputs.length!==1)return {ok:false,reason:'xiaohongshu active cover input missing or ambiguous',count:inputs.length}
+      const input=inputs[0];window.__VP2_XHS_SELECTED_FILE__=null
+      input.addEventListener('change',()=>{const file=input.files?.[0];window.__VP2_XHS_SELECTED_FILE__=file?{name:file.name,size:file.size,type:file.type}:null},{capture:true,once:true})
       input.id='vp2-xhs-cover'; return {ok:true,selector:'#vp2-xhs-cover',accept:input.accept||''}
     })()`);
+    let exposed=await exposeInput();
+    if(!exposed.ok&&exposed.count===0){
+      const clear=await js(String.raw`(()=>{const modal=document.querySelector('.main-cover-editor-modal');const buttons=[...(modal?.querySelectorAll('.uploaded-thumbnail-clear')||[])].filter(e=>e.getBoundingClientRect().width>0);if(buttons.length!==1)return {ok:false};buttons[0].click();return {ok:true}})()`);
+      if(clear.ok){for(let i=0;i<12;i+=1){await wait(0.5);exposed=await exposeInput();if(exposed.ok)break}}
+    }
     if (!exposed.ok) return exposed;
     try { await uploadFile(exposed.selector, xhsCoverPath); } catch (error) { return { ok: false, reason: String(error?.message || error) }; }
     await wait(2);
   }
-  let ratio = await js(String.raw`(() => {
+  selectedFile=await js(String.raw`(() => window.__VP2_XHS_SELECTED_FILE__||null)()`);
+  if(selectedFile?.name!==path.basename(xhsCoverPath)||selectedFile?.size!==fs.statSync(xhsCoverPath).size)return {ok:false,reason:'xiaohongshu requested cover file was not proven',selectedFile};
+  const modernRatio=await js(String.raw`(() => {
+    const modal=document.querySelector('.main-cover-editor-modal');
+    const item=[...(modal?.querySelectorAll('button.ratio-option')||[])].find(e=>String(e.innerText||e.textContent||'').replace(/\s+/g,' ').trim()==='3:4');
+    if(!item)return {ok:false};item.id='vp2-xhs-modern-ratio';return {ok:true,selector:'#vp2-xhs-modern-ratio'};
+  })()`);
+  if(modernRatio.ok){await click(modernRatio.selector,{label:'select xhs portrait crop ratio'});await wait(0.5);}
+  let ratio = modernRatio.ok?{ok:true}:await js(String.raw`(() => {
     const item=[...document.querySelectorAll('.crop-ratio-item')].find(el=>String(el.innerText||el.textContent||'').replace(/\s+/g,' ').trim()==='3:4')
     if(!item)return {ok:false,reason:'legacy-ratio-control-missing'}
     item.click(); return {ok:true,className:String(item.className||'')}
@@ -499,10 +561,7 @@ async function uploadXhsCover() {
         .find(el=>el.matches('.main-cover-editor-modal')||/设置封面/.test(compact(el.innerText||el.textContent||'')))
       const item=modal?.querySelector('.ratio-select')
       if(!item){
-        const uploaded=[...modal?.querySelectorAll('.uploaded-thumbnail-img')||[]].find(el=>el.naturalWidth>0&&el.naturalHeight>0)
-        const actualRatio=uploaded?uploaded.naturalWidth/uploaded.naturalHeight:0
-        if(uploaded&&Math.abs(actualRatio-0.75)<0.01)return {ok:true,already:true,inferredFromUploadedThumbnail:true,actual:'3:4',width:uploaded.naturalWidth,height:uploaded.naturalHeight}
-        return {ok:false,reason:'xiaohongshu ratio selector missing',uploadedThumbnail:uploaded?{width:uploaded.naturalWidth,height:uploaded.naturalHeight}:null}
+        return {ok:false,reason:'xiaohongshu crop ratio selector missing in the active crop panel'}
       }
       if(String(item.innerText||item.textContent||'').replace(/\s+/g,' ').trim()==='3:4')return {ok:true,already:true}
       item.id='vp2-xhs-ratio-select';return {ok:true,selector:'#vp2-xhs-ratio-select'}
@@ -520,15 +579,24 @@ async function uploadXhsCover() {
       try { await click(ratioItem.selector, { label: 'select xhs 3:4 cover ratio' }); } catch (error) { return { ok: false, reason: `xiaohongshu 3:4 ratio click failed: ${String(error?.message || error)}` }; }
       await wait(0.5);
     }
-    ratio = ratioControl.inferredFromUploadedThumbnail
-      ? ratioControl
-      : await js(String.raw`(() => {
+    ratio = await js(String.raw`(() => {
         const modal=[...document.querySelectorAll('.main-cover-editor-modal,.d-modal,[role="dialog"]')].find(el=>el.matches('.main-cover-editor-modal')||/设置封面/.test(el.innerText||el.textContent||''))
         const actual=String(modal?.querySelector('.ratio-select')?.innerText||modal?.querySelector('.ratio-select')?.textContent||'').replace(/\s+/g,' ').trim()
-        return actual==='3:4'?{ok:true,actual}:{ok:false,reason:'xiaohongshu 3:4 ratio did not persist',actual}
+        const control=modal?.querySelector('.ratio-select');const rect=control?.getBoundingClientRect();const controlVisible=Boolean(rect&&rect.width>4&&rect.height>4);return actual==='3:4'?{ok:true,actual,controlVisible}:{ok:false,reason:'xiaohongshu 3:4 ratio did not persist',actual,controlVisible}
       })()`);
   }
   if (!ratio.ok) return ratio;
+  const cropProof=await js(String.raw`(() => {
+    const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return r.width>4&&r.height>4&&s.display!=='none'&&s.visibility!=='hidden'};
+    const modal=[...document.querySelectorAll('.main-cover-editor-modal,.d-modal,[role="dialog"]')].find(e=>visible(e)&&/设置封面/.test(e.innerText||e.textContent||''));
+    const modern=modal?.querySelector('button.ratio-option.active');
+    if(modern&&visible(modern))return {actual:String(modern.innerText||modern.textContent||'').replace(/\s+/g,' ').trim(),controlVisible:true,mode:'ratio-option'};
+    const current=modal?.querySelector('.ratio-select');
+    if(current&&visible(current))return {actual:String(current.innerText||current.textContent||'').replace(/\s+/g,' ').trim(),controlVisible:true};
+    const legacy=[...(modal?.querySelectorAll('.crop-ratio-item')||[])].find(e=>visible(e)&&/^(active|selected)$/.test(String(e.className||'').split(/\s+/).find(x=>/^(active|selected)$/.test(x))||''));
+    return {actual:String(legacy?.innerText||legacy?.textContent||'').trim(),controlVisible:Boolean(legacy)};
+  })()`);
+  if(!xhsCoverCropMatches(cropProof))return {ok:false,reason:'xiaohongshu crop ratio was not proven as 3:4',cropProof};
   await wait(1);
   const confirmed = await js(String.raw`(() => {
     const compact=value=>String(value||'').replace(/\s+/g,' ').trim()
@@ -550,7 +618,9 @@ async function uploadXhsCover() {
   await removeExactStaleMask(/设置封面/);
   if (!after || after === before) return { ok: false, reason: 'xiaohongshu cover preview did not change', before, after };
   const url = (after.match(/url\(["']?([^"')]+)/) || [])[1] || after;
-  return { ok: true, receipt: { assetPath: xhsCoverPath, ratio: '3:4', beforeUrl: before, afterUrl: url } };
+  const acceptedImage=await readXhsAcceptedImage(url);
+  if(!acceptedImage.loaded||Math.abs(acceptedImage.width/acceptedImage.height-0.75)>=0.01)return {ok:false,reason:'xiaohongshu accepted cover is not 3:4',acceptedImage};
+  return { ok: true, receipt: { assetPath: xhsCoverPath, ratio: '3:4', beforeUrl: before, afterUrl: url,selectedFile,cropProof,acceptedImage } };
 }
 
 async function ensureXiaohongshuEarlyMetadata(before) {
@@ -594,7 +664,7 @@ async function mutateXiaohongshu() {
   const actions = { ...metadata.actions };
   actions.original = await ensureXhsOriginal();
   if (!actions.original.ok) return { ...(await inspectXiaohongshu()), blocker: typedBlocker('ACTION_FAILED', actions.original.reason, { evidence: actions.original }) };
-  actions.cover = await uploadXhsCover();
+  actions.cover = (await inspectXiaohongshu()).gates.cover.ok ? {ok:true,skipped:true} : await uploadXhsCover();
   if (!actions.cover.ok) return { ...(await inspectXiaohongshu()), blocker: typedBlocker('PLATFORM_REJECTED_ASSET', actions.cover.reason, { retryable: true, evidence: actions.cover }) };
   const receipts = actions.cover.receipt ? { cover: actions.cover.receipt } : {};
   actions.receiptCheckpoint = checkpointReceipts(receipts);

@@ -105,7 +105,7 @@ youtubeNotifySubscribers：boolean，默认 true
 ```text
 cover.vertical3x4Path：小红书；抖音和视频号的竖版槽
 cover.horizontal4x3Path：抖音和视频号的横版槽；B站首页主封面
-cover.horizontal16x9Path：YouTube 缩略图；可选 B站个人空间伴随图
+cover.horizontal16x9Path：YouTube 缩略图；B站个人空间封面
 cover.platforms.<平台>：可选平台专用路径覆盖；只替换一个平台封面时优先使用
 ```
 
@@ -114,7 +114,7 @@ cover.platforms.<平台>：可选平台专用路径覆盖；只替换一个平�
 ```text
 小红书：3:4
 抖音：3:4 + 4:3
-B站：4:3
+B站：4:3 + 16:9
 视频号：3:4 + 4:3
 YouTube：16:9
 ```

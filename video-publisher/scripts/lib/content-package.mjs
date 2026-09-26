@@ -108,7 +108,10 @@ export function coverAssetsForPlatform(pkg, platform) {
       ...(verticalPath ? [{ slot: "portrait", ratio: "3:4", path: verticalPath }] : []),
       ...(horizontalPath ? [{ slot: "landscape", ratio: "4:3", path: horizontalPath }] : []),
     ],
-    bilibili: horizontalPath ? [{ slot: "homepage-master", ratio: "4:3", path: horizontalPath }] : [],
+    bilibili: [
+      ...(horizontalPath ? [{ slot: "homepage-master", ratio: "4:3", path: horizontalPath }] : []),
+      ...(widescreenPath ? [{ slot: "personal-space", ratio: "16:9", path: widescreenPath }] : []),
+    ],
     douyin: [
       ...(verticalPath ? [{ slot: "portrait", ratio: "3:4", path: verticalPath }] : []),
       ...(horizontalPath ? [{ slot: "landscape", ratio: "4:3", path: horizontalPath }] : []),
@@ -243,6 +246,9 @@ export function validateCoverPackage(pkg, platform) {
   }
   if (platform === "wechat_channels" && assets.length !== 2) {
     errors.push("wechat_channels custom cover upload requires both 3:4 personal-profile and 4:3 share-card covers");
+  }
+  if (platform === "bilibili" && assets.length !== 2) {
+    errors.push("bilibili custom cover upload requires separate 4:3 homepage and 16:9 personal-space files");
   }
   if (platform === "youtube" && assets.length !== 1) {
     errors.push("youtube custom thumbnail upload requires one exact 16:9 horizontal16x9Path");

@@ -46,3 +46,45 @@ test("a Bilibili cover override changes only the Bilibili cover identity", async
   assert.equal(base.coverFingerprints.douyin, changed.coverFingerprints.douyin);
   assert.equal(base.coverFingerprints.wechat_channels, changed.coverFingerprints.wechat_channels);
 });
+
+test("changing only Bilibili's 16:9 personal-space image changes the Bilibili fingerprint", async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "video-publisher-bilibili-space-identity-test-"));
+  try {
+    const videoPath = path.join(root, "video.mp4");
+    const homepagePath = path.join(root, "homepage.png");
+    const firstSpacePath = path.join(root, "space-a.png");
+    const secondSpacePath = path.join(root, "space-b.png");
+    await fs.promises.writeFile(videoPath, "video");
+    await fs.promises.writeFile(homepagePath, pngHeader(1440, 1080, 1));
+    await fs.promises.writeFile(firstSpacePath, pngHeader(1280, 720, 1));
+    await fs.promises.writeFile(secondSpacePath, pngHeader(1280, 720, 2));
+    const base = {
+      videoPath,
+      title: "Two Bilibili covers",
+      cover: {
+        uploadCustomCover: true,
+        horizontal4x3Path: homepagePath,
+        platforms: { bilibili: { horizontal16x9Path: firstSpacePath } },
+      },
+    };
+    const first = await buildIdentity(base);
+    const changed = await buildIdentity({
+      ...base,
+      cover: {
+        ...base.cover,
+        platforms: { bilibili: { horizontal16x9Path: secondSpacePath } },
+      },
+    });
+
+    assert.equal(first.contentFingerprint, changed.contentFingerprint);
+    assert.equal(first.legacyFingerprint, changed.legacyFingerprint);
+    assert.notEqual(first.coverFingerprints.bilibili, changed.coverFingerprints.bilibili);
+    assert.notEqual(first.coverFingerprint, changed.coverFingerprint);
+    assert.notEqual(first.fingerprint, changed.fingerprint);
+    for (const platform of ["xiaohongshu", "douyin", "wechat_channels", "youtube"]) {
+      assert.equal(first.coverFingerprints[platform], changed.coverFingerprints[platform]);
+    }
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
+});

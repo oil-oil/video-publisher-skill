@@ -37,6 +37,8 @@ description: "将本地视频、标题和封面准备为小红书、抖音、B�
 4. 将确认后的内容包 JSON 写到 Skill 目录之外。只有明确上传已有封面时才读取 `references/cover-workflow.md`。
 5. 直接运行生产入口；它会在打开页面前统一完成配置、内容包、媒体和封面校验：
 
+   Windows 使用 `scripts\run-safe-platforms.cmd`，或 `node scripts/v2/publisher.mjs`，参数相同。
+
    ```bash
    scripts/run-safe-platforms.sh <package.json> [task-suffix] [platform...]
    ```

@@ -44,12 +44,12 @@ test("job store keeps private state and evidence permissions", async () => {
   }, { ready: false, missing: ["video"], blocker: null });
   await store.save();
   await store.close();
-  assert.equal(fs.statSync(root).mode & 0o777, 0o700);
-  assert.equal(fs.statSync(store.evidenceDir).mode & 0o777, 0o700);
-  assert.equal(fs.statSync(store.checkpointDir).mode & 0o777, 0o700);
-  assert.equal(fs.statSync(store.statePath).mode & 0o777, 0o600);
-  assert.equal(fs.statSync(store.backupPath).mode & 0o777, 0o600);
-  assert.equal(fs.statSync(store.state.platforms.xiaohongshu.lastEvidencePath).mode & 0o777, 0o600);
+  if (process.platform !== "win32") assert.equal(fs.statSync(root).mode & 0o777, 0o700);
+  if (process.platform !== "win32") assert.equal(fs.statSync(store.evidenceDir).mode & 0o777, 0o700);
+  if (process.platform !== "win32") assert.equal(fs.statSync(store.checkpointDir).mode & 0o777, 0o700);
+  if (process.platform !== "win32") assert.equal(fs.statSync(store.statePath).mode & 0o777, 0o600);
+  if (process.platform !== "win32") assert.equal(fs.statSync(store.backupPath).mode & 0o777, 0o600);
+  if (process.platform !== "win32") assert.equal(fs.statSync(store.state.platforms.xiaohongshu.lastEvidencePath).mode & 0o777, 0o600);
 });
 
 test("job store restores a corrupt primary from its atomic backup", async () => {

@@ -66,6 +66,24 @@ mkdir -p ~/.claude/skills/video-publisher
 cp -R video-publisher-skill/video-publisher/. ~/.claude/skills/video-publisher/
 ```
 
+Windows PowerShell 安装到 Codex：
+
+```powershell
+git clone https://github.com/oil-oil/video-publisher-skill.git
+$skillDestination = Join-Path $env:USERPROFILE '.codex\skills\video-publisher'
+New-Item -ItemType Directory -Path $skillDestination -Force | Out-Null
+Copy-Item -Path '.\video-publisher-skill\video-publisher\*' -Destination $skillDestination -Recurse
+```
+
+Windows 使用 `scripts\run-safe-platforms.cmd`，参数与 `.sh` 完全一致；也可以直接运行 `node scripts/v2/publisher.mjs`。路径含空格或中文时加引号。生产程序直接将 UTF-8 脚本传给 Ego CLI 的 stdin，不经过 PowerShell 文本管道。
+
+```powershell
+Set-Location $skillDestination
+.\scripts\run-safe-platforms.cmd --package 'C:\Videos\package.json' --platform xiaohongshu
+```
+
+CLI 输出先按严格 UTF-8 解码；当前中文 Windows 的 Ego Lite 输出 GBK 时回退到 GB18030。其他系统代码页或需要固定编码时可设置 `$env:VIDEO_PUBLISHER_EGO_OUTPUT_ENCODING='windows-1252'` 等 TextDecoder 支持的编码。本地配置、状态 JSON 和输入脚本始终使用 UTF-8。
+
 ### 3. 在对话中使用
 
 ```text

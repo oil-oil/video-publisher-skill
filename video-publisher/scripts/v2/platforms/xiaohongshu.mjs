@@ -1,6 +1,6 @@
 const xhsTitle = pkg.platformTitle.xiaohongshu;
 const xhsTopics = pkg.xhsTopics;
-const xhsVideoName = videoPath.split('/').pop();
+const xhsVideoName = videoPath.split(/[\\/]/).pop();
 const xhsCustomCover = pkg.cover?.uploadCustomCover === true;
 const xhsCoverPath = String(pkg.cover?.vertical3x4Path || '');
 
@@ -340,6 +340,12 @@ async function ensureXhsOriginal() {
     const row=ancestors.find(el=>el.matches?.(selectors)||el.querySelector?.(selectors))||ancestors.find(el=>{const s=getComputedStyle(el);return compact(el.innerText||el.textContent||'')==='原创声明'&&(parseFloat(s.borderRadius)>0||s.backgroundColor!=='rgba(0, 0, 0, 0)')})||label?.parentElement
     const target=row?.querySelector?.('.d-switch-simulator')||(row?.matches?.('.d-switch-simulator')?row:null)||(row?.matches?.(selectors)?row:row?.querySelector(selectors))||row
     if (!target) return { ok: false, reason: 'xiaohongshu original switch missing' }
+    const disabled = target.disabled === true || target.getAttribute?.('aria-disabled') === 'true' || Boolean(target.closest('.disabled, [aria-disabled="true"]'))
+    if (disabled) {
+      const text = compact(document.body.innerText || '')
+      const durationHint = text.match(/视频时长小于\s*10\s*s[^。\n]*/i)?.[0] || ''
+      return { ok:false, disabled:true, reason:durationHint || 'xiaohongshu original declaration control is disabled', blockerCode:durationHint ? 'PLATFORM_REJECTED_ASSET' : 'STATE_AMBIGUOUS', className:String(target.className||'') }
+    }
     target.id='vp2-xhs-original-control';target.scrollIntoView({block:'center',inline:'center'});return {ok:true,selector:'#vp2-xhs-original-control',className:String(target.className||''),tag:target.tagName,role:target.getAttribute?.('role')||''}
   })()`);
   if (!control.ok) return control;
@@ -663,7 +669,7 @@ async function mutateXiaohongshu() {
   if (!metadata.ok) return { ...metadata.current, actions: metadata.actions, blocker: metadata.blocker };
   const actions = { ...metadata.actions };
   actions.original = await ensureXhsOriginal();
-  if (!actions.original.ok) return { ...(await inspectXiaohongshu()), blocker: typedBlocker('ACTION_FAILED', actions.original.reason, { evidence: actions.original }) };
+  if (!actions.original.ok) return { ...(await inspectXiaohongshu()), blocker: typedBlocker(actions.original.blockerCode || 'ACTION_FAILED', actions.original.reason, { evidence: actions.original }) };
   actions.cover = (await inspectXiaohongshu()).gates.cover.ok ? {ok:true,skipped:true} : await uploadXhsCover();
   if (!actions.cover.ok) return { ...(await inspectXiaohongshu()), blocker: typedBlocker('PLATFORM_REJECTED_ASSET', actions.cover.reason, { retryable: true, evidence: actions.cover }) };
   const receipts = actions.cover.receipt ? { cover: actions.cover.receipt } : {};

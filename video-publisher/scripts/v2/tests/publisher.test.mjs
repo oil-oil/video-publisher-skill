@@ -10,6 +10,49 @@ const DIR = path.dirname(fileURLToPath(import.meta.url));
 const V2_DIR = path.dirname(DIR);
 process.env.VIDEO_PUBLISHER_V2_LOCK_ROOT = path.join(os.tmpdir(), `video-publisher-publisher-test-locks-${process.pid}`);
 
+for (const loginRequired of [false, true]) test(`all five platforms run through Windows-compatible orchestration (${loginRequired ? 'login boundary' : 'mock READY'})`, async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'video-publisher-five-platforms-'));
+  try {
+    const platforms = ['xiaohongshu', 'douyin', 'bilibili', 'wechat_channels', 'youtube'];
+    const videoPath = path.join(root, '中文 test.mp4');
+    const packagePath = path.join(root, 'package.json');
+    const configPath = path.join(root, 'config.json');
+    const log = path.join(root, 'events.ndjson');
+    await fs.promises.writeFile(videoPath, mp4WithDuration(12));
+    await fs.promises.writeFile(packagePath, JSON.stringify({
+      videoPath, title: 'Windows 测试', xhsTopics: ['测试'], douyinTopics: ['测试'],
+      bilibiliDescription: 'Windows 测试', bilibiliTags: ['测试'],
+      wechatDescription: 'Windows 测试 #测试', wechatTags: ['测试'],
+      youtubeDescription: 'Windows 测试', youtubeTags: [],
+      youtubeAudience: 'not_made_for_kids', youtubeVisibility: 'private', cover: { uploadCustomCover: false },
+    }));
+    await fs.promises.writeFile(configPath, JSON.stringify({
+      schemaVersion: 2, onboarding: { completed: true }, sourceDirectory: root,
+      availablePlatforms: platforms, defaultPlatforms: platforms,
+      declarations: { originalityPolicy: 'all_videos_original' }, execution: { checkConcurrency: 4, uploadConcurrency: 4 },
+    }));
+    const blockers = loginRequired ? Object.fromEntries(platforms.map(platform => [`${platform}:inspect`, {
+      code: 'AUTH_REQUIRED', message: 'mock login required', requiresUser: true,
+    }])) : {};
+    const result = await run(process.execPath, [path.join(V2_DIR, 'publisher.mjs'), '--package', packagePath,
+      '--job-id', 'all-five', '--state-root', root, '--no-cleanup-stale-spaces'], {
+      env: { VIDEO_PUBLISHER_CONFIG: configPath, VIDEO_PUBLISHER_V2_RUNNER: path.join(DIR, 'mock-runner.mjs'),
+        VIDEO_PUBLISHER_V2_MOCK_LOG: log, VIDEO_PUBLISHER_V2_MOCK_BLOCKERS: JSON.stringify(blockers) },
+    });
+    assert.equal(result.code, loginRequired ? 10 : 0, result.stderr);
+    const summary = JSON.parse(result.stdout);
+    assert.equal(summary.ready, !loginRequired);
+    const events = (await fs.promises.readFile(log, 'utf8')).trim().split('\n').map(JSON.parse);
+    for (const platform of platforms) {
+      assert.equal(summary.platforms[platform].ready, !loginRequired);
+      assert.equal(summary.platforms[platform].blocker?.code || null, loginRequired ? 'AUTH_REQUIRED' : null);
+      const phases = events.filter(event => event.platform === platform && event.event === 'start').map(event => event.phase);
+      if (loginRequired) assert.deepEqual(phases, ['inspect']);
+      else for (const phase of ['inspect', 'upload_start', 'upload', 'mutate', 'verify']) assert.ok(phases.includes(phase), `${platform}:${phase}`);
+    }
+  } finally { await fs.promises.rm(root, { recursive: true, force: true }); }
+});
+
 function closeNamesFromLog(script) {
   const match = [...String(script).matchAll(/const closeNames = new Set\((\[.*?\])\)/gs)].at(-1);
   return match ? JSON.parse(match[1]) : [];

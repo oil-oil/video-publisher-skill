@@ -11,7 +11,7 @@ const youtubePaidPromotion = pkg.youtubePaidPromotion === true;
 const youtubeAlteredContent = pkg.youtubeAlteredContent === true;
 const youtubeAllowEmbedding = pkg.youtubeAllowEmbedding !== false;
 const youtubeNotifySubscribers = pkg.youtubeNotifySubscribers !== false;
-const youtubeVideoName = videoPath.split('/').pop();
+const youtubeVideoName = videoPath.split(/[\\/]/).pop();
 const youtubeVideoStem = youtubeVideoName.replace(/\.[^.]+$/, '');
 const youtubeCustomThumbnail = pkg.cover?.uploadCustomCover === true;
 const youtubeThumbnailPath = String(pkg.cover?.horizontal16x9Path || '');

@@ -2,7 +2,7 @@ const bilibiliTitle = pkg.platformTitle.bilibili;
 const bilibiliDescription = pkg.bilibiliDescription;
 const bilibiliTags = pkg.bilibiliTags;
 const bilibiliAllowedAutoTags = pkg.bilibiliAllowedAutoTags;
-const bilibiliVideoName = videoPath.split('/').pop();
+const bilibiliVideoName = videoPath.split(/[\\/]/).pop();
 const bilibiliVideoStem = bilibiliVideoName.replace(/\.[^.]+$/,'');
 const bilibiliCustomCover = pkg.cover?.uploadCustomCover === true;
 const bilibiliCoverAssets = [

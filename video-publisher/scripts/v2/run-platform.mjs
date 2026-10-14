@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { decodeEgoOutput } from "./lib/ego-output.mjs";
 import { fileURLToPath } from "node:url";
 import {
   coverForPlatform,
@@ -41,7 +42,9 @@ function usage() {
 
 function runEgo(script, onSpawn) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.env.VIDEO_PUBLISHER_V2_EGO_COMMAND || "ego-browser", ["nodejs"], { stdio: ["pipe", "pipe", "pipe"] });
+    const command = process.env.VIDEO_PUBLISHER_V2_EGO_COMMAND || "ego-browser";
+    const isNodeScript = /\.(mjs|cjs|js)$/i.test(command);
+    const child = spawn(isNodeScript ? process.execPath : command, isNodeScript ? [command] : ["nodejs"], { stdio: ["pipe", "pipe", "pipe"] });
     let releaseMember = () => {};
     let settled = false;
     const fail = error => {
@@ -58,15 +61,15 @@ function runEgo(script, onSpawn) {
       fail(error);
       return;
     }
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", chunk => { stdout += chunk; });
-    child.stderr.on("data", chunk => { stderr += chunk; });
+    const stdout = [];
+    const stderr = [];
+    child.stdout.on("data", chunk => { stdout.push(chunk); });
+    child.stderr.on("data", chunk => { stderr.push(chunk); });
     child.on("close", code => {
       releaseMember();
       if (settled) return;
       settled = true;
-      resolve({ code: code ?? 1, stdout, stderr });
+      resolve({ code: code ?? 1, stdout: decodeEgoOutput(stdout), stderr: decodeEgoOutput(stderr) });
     });
     child.stdin.end(script);
   });
@@ -159,7 +162,7 @@ try {
   result = parseV2Result(combined, "Ego runner");
 } catch (error) {
   const detail = combined.trim().slice(-1600);
-  const userControl = /user (?:has|had) taken control|user took control|user is controlling|user controls|用户.*控制|not assigned to an agent|task space.*inactive/i.test(detail);
+  const userControl = /user (?:has|had) taken control|user took control|user is controlling|user controls|user now controls|browser permission prompt|用户.*控制|not assigned to an agent|task space.*inactive/i.test(detail);
   if (execution.code === 0 && detail) {
     console.error(detail);
     throw error;

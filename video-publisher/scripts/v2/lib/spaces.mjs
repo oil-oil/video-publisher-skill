@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { decodeEgoOutput } from "./ego-output.mjs";
 
 export const IN_PROGRESS_STATUSES = ["running", "inspecting", "paused_user", "blocked"];
 export const LEGACY_COLLECT_SPACE = "oil-collect-publish";
@@ -122,12 +123,12 @@ export function runEgoScript(script, command = process.env.VIDEO_PUBLISHER_V2_EG
   const args = isNodeScript ? [command] : ["nodejs"];
   return new Promise((resolve, reject) => {
     const child = spawn(file, args, { stdio: ["pipe", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", chunk => { stdout += chunk; });
-    child.stderr.on("data", chunk => { stderr += chunk; });
+    const stdout = [];
+    const stderr = [];
+    child.stdout.on("data", chunk => { stdout.push(chunk); });
+    child.stderr.on("data", chunk => { stderr.push(chunk); });
     child.on("error", reject);
-    child.on("close", code => resolve({ code: code ?? 1, stdout, stderr }));
+    child.on("close", code => resolve({ code: code ?? 1, stdout: decodeEgoOutput(stdout), stderr: decodeEgoOutput(stderr) }));
     child.stdin.end(script);
   });
 }

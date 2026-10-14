@@ -42,6 +42,10 @@ Validation checks the local video path, platform-specific title limits, required
 
 ## Production Orchestrator
 
+Windows PowerShell / cmd: use `scripts\run-safe-platforms.cmd` with the same arguments. The portable equivalent is `node scripts/v2/publisher.mjs`. The `.sh` wrapper requires Bash. Production sends UTF-8 scripts through Node stdin, avoiding PowerShell quoting and text-pipeline encoding issues.
+
+Ego output is buffered before decoding so multibyte characters may span stream chunks. UTF-8 is preferred; Windows falls back to GB18030 for the current Chinese Ego Lite CLI. Set `VIDEO_PUBLISHER_EGO_OUTPUT_ENCODING` to a supported TextDecoder encoding for another system code page or to force a known encoding.
+
 ```bash
 scripts/run-safe-platforms.sh \
   --package /absolute/path/to/package.json \
@@ -138,6 +142,8 @@ State defaults to `~/.video-publisher/v2-jobs/<job-id>/`. The job stores the pac
 Before state or browser work, production acquires the account-wide publisher lock under `${VIDEO_PUBLISHER_V2_LOCK_ROOT:-$HOME/.video-publisher/v2-locks}/publisher/`, then `<job-dir>/orchestrator.lock/`. The first is independent of `--state-root`; the second protects persisted state. Direct diagnosis proves parent-lock ownership or acquires the same lock, and each spawned Ego controller registers a token-bound member PID. Normal completion removes locks; crash recovery removes the publisher lock only after its owner and all registered members are dead.
 
 Job directories use mode `0700`. State, evidence, receipt checkpoints, and lock-owner JSON use mode `0600`; opening an existing job also repairs older broader permissions.
+
+These POSIX permission bits apply on POSIX filesystems. On Windows, Node chmod does not configure NTFS ACLs; files inherit the destination's existing ACLs. Choose a private user directory for configuration and state. Windows tests validate persistence, recovery and lock behavior without asserting POSIX mode bits.
 
 To resume an interrupted run, repeat the same command with the same `--job-id`. The package fingerprint must match. The orchestrator reuses a persisted task space only when both its numeric id and exact stable name identify the same live space; this prevents Ego's post-crash numeric-id recycling from entering another job. It restores only checkpoints whose platform, package fingerprint, and task-space id all match, then inspects page truth again before acting. If the recorded id is missing or has another live name, the runner selects or recreates only the recorded exact platform-space name and writes its current id back. An explicit recreation invalidates receipts even when Ego assigns the replacement the same numeric id. Ownership or user-control errors never use this fallback.
 

@@ -61,7 +61,7 @@ test("completed onboarding writes a valid private per-user configuration", async
   assert.deepEqual(ready.config.defaultPlatforms, ["douyin", "bilibili"]);
   assert.deepEqual(ready.config.platforms.douyin.defaultTopics, ["Tutorial"]);
   assert.equal(ready.config.declarations.originalityPolicy, "all_videos_original");
-  assert.equal(fs.statSync(configPath).mode & 0o777, 0o600);
+  if (process.platform !== "win32") assert.equal(fs.statSync(configPath).mode & 0o777, 0o600);
   await fs.promises.rm(root, { recursive: true, force: true });
 });
 

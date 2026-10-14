@@ -12,8 +12,8 @@ test("job lock permits exactly one orchestrator and releases idempotently", asyn
   assert.equal(typeof release.token, "string");
   assert.equal(assertJobLockOwner(root, release.token).jobId, "same-job");
   assert.throws(() => assertJobLockOwner(root, "wrong-token"), JobBusyError);
-  assert.equal(fs.statSync(root).mode & 0o777, 0o700);
-  assert.equal(fs.statSync(path.join(root, "orchestrator.lock", "owner.json")).mode & 0o777, 0o600);
+  if (process.platform !== "win32") assert.equal(fs.statSync(root).mode & 0o777, 0o700);
+  if (process.platform !== "win32") assert.equal(fs.statSync(path.join(root, "orchestrator.lock", "owner.json")).mode & 0o777, 0o600);
   assert.throws(() => acquireJobLock(root, { jobId: "same-job" }), JobBusyError);
   release();
   release();

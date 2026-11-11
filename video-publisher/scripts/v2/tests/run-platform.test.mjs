@@ -146,3 +146,49 @@ test("platform runner recognizes Ego's real user-takeover wording",async()=>{
   assert.match(observation.blocker.evidence.detail,/user has taken control/i);
   assert.equal(observation.finalPublishClicked,false);
 });
+
+test("platform runner defers missing cover file check until mutate when VIDEO_PUBLISHER_V2_DEFER_COVER=1",async()=>{
+  const root=await fs.promises.mkdtemp(path.join(os.tmpdir(),"video-publisher-v2-defer-cover-runner-"));
+  const videoPath=path.join(root,"sample.mp4");
+  const missingCover=path.join(root,"not-yet-generated_3x4.png");
+  const packagePath=path.join(root,"package.json");
+  const configPath=path.join(root,"config.json");
+  const fakeEgoPath=path.join(root,"fake-ego");
+  await fs.promises.writeFile(videoPath,"test video fixture");
+  await fs.promises.writeFile(packagePath,JSON.stringify({
+    videoPath,
+    title:"Deferred cover runner",
+    xhsTopics:["Test"],
+    cover:{uploadCustomCover:true,vertical3x4Path:missingCover},
+  }));
+  await fs.promises.writeFile(configPath,JSON.stringify({
+    schemaVersion:2,
+    onboarding:{completed:true},
+    sourceDirectory:root,
+    availablePlatforms:["xiaohongshu"],
+    defaultPlatforms:["xiaohongshu"],
+    declarations:{originalityPolicy:"all_videos_original"},
+  }));
+  const mockObservation={
+    schemaVersion:1,
+    platform:"xiaohongshu",
+    phase:"inspect",
+    taskSpaceId:777,
+    observedAt:"2026-11-11T00:00:00.000Z",
+    finalPublishClicked:false,
+    gates:{authenticated:{ok:true,evidence:{}},draftIdentity:{ok:true,evidence:{}},video:{ok:false,evidence:{}},safety:{ok:true,evidence:{finalPublishClicked:false,guardArmed:true,blockedAttempts:0}}},
+  };
+  await fs.promises.writeFile(fakeEgoPath,`#!/bin/sh\ncat >/dev/null\nprintf 'VIDEO_PUBLISHER_V2_RESULT:%s\\n' '${JSON.stringify(mockObservation)}'\n`);
+  await fs.promises.chmod(fakeEgoPath,0o755);
+
+  const inspectDeferred=await run(process.execPath,[path.join(V2_DIR,"run-platform.mjs"),"xiaohongshu",packagePath,"inspect","defer-test","777"],{
+    env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_EGO_COMMAND:fakeEgoPath,VIDEO_PUBLISHER_V2_DEFER_COVER:"1"},
+  });
+  assert.equal(inspectDeferred.code,0,`${inspectDeferred.stderr}\n${inspectDeferred.stdout}`);
+
+  const mutateStillFailsClosed=await run(process.execPath,[path.join(V2_DIR,"run-platform.mjs"),"xiaohongshu",packagePath,"mutate","defer-test","777"],{
+    env:{...process.env,VIDEO_PUBLISHER_CONFIG:configPath,VIDEO_PUBLISHER_V2_EGO_COMMAND:fakeEgoPath,VIDEO_PUBLISHER_V2_DEFER_COVER:"1"},
+  });
+  assert.notEqual(mutateStillFailsClosed.code,0);
+  assert.match(mutateStillFailsClosed.stderr,/custom cover file not found/);
+});

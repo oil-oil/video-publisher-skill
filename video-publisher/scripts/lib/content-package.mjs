@@ -97,6 +97,24 @@ export function coverForPlatform(pkg, platform) {
   };
 }
 
+export const PLATFORM_COVER_ASPECTS = Object.freeze({
+  xiaohongshu: ["3x4"],
+  douyin: ["3x4", "4x3"],
+  bilibili: ["4x3"],
+  wechat_channels: ["3x4", "4x3"],
+  youtube: ["16x9"],
+});
+
+export function requiredCoverAspectsForPlatform(platform) {
+  return [...(PLATFORM_COVER_ASPECTS[platform] || [])];
+}
+
+export function requiredCoverAspectsForPlatforms(platforms = []) {
+  const ordered = ["3x4", "4x3", "16x9"];
+  const needed = new Set(platforms.flatMap(platform => requiredCoverAspectsForPlatform(platform)));
+  return ordered.filter(aspect => needed.has(aspect));
+}
+
 export function coverAssetsForPlatform(pkg, platform) {
   const cover = coverForPlatform(pkg, platform);
   const verticalPath = cover.vertical3x4Path;
@@ -221,10 +239,11 @@ export function validateCommonPackage(pkg) {
   return errors;
 }
 
-export function validateCoverPackage(pkg, platform) {
+export function validateCoverPackage(pkg, platform, options = {}) {
   const errors = [];
   const cover = coverForPlatform(pkg, platform);
   if (!coverUploadEnabled(cover)) return errors;
+  if (options.skipCoverFiles === true) return errors;
   if (
     platform === "bilibili"
     && !cover.horizontal4x3Path
@@ -260,9 +279,9 @@ export function validateCoverPackage(pkg, platform) {
   return errors;
 }
 
-export function validateDouyinPackage(pkg) {
+export function validateDouyinPackage(pkg, options = {}) {
   const errors = validateCommonPackage(pkg);
-  errors.push(...validateCoverPackage(pkg, "douyin"));
+  errors.push(...validateCoverPackage(pkg, "douyin", options));
   const douyinTitle = String(pkg.platformTitle?.douyin || pkg.title || "");
   const douyinTitleLength = codePointLength(douyinTitle);
   if (douyinTitleLength > 30) errors.push(`douyin title is ${douyinTitleLength}/30`);
@@ -274,9 +293,9 @@ export function validateDouyinPackage(pkg) {
   return errors;
 }
 
-export function validateBilibiliPackage(pkg) {
+export function validateBilibiliPackage(pkg, options = {}) {
   const errors = validateCommonPackage(pkg);
-  errors.push(...validateCoverPackage(pkg, "bilibili"));
+  errors.push(...validateCoverPackage(pkg, "bilibili", options));
   const bilibiliTitle = String(pkg.platformTitle?.bilibili || pkg.title || "");
   const bilibiliTitleLength = codePointLength(bilibiliTitle);
   if (bilibiliTitleLength > 80) errors.push(`bilibili title is ${bilibiliTitleLength}/80`);
@@ -286,9 +305,9 @@ export function validateBilibiliPackage(pkg) {
   return errors;
 }
 
-export function validateXiaohongshuPackage(pkg) {
+export function validateXiaohongshuPackage(pkg, options = {}) {
   const errors = validateCommonPackage(pkg);
-  errors.push(...validateCoverPackage(pkg, "xiaohongshu"));
+  errors.push(...validateCoverPackage(pkg, "xiaohongshu", options));
   const xhsTitle = String(pkg.platformTitle?.xiaohongshu || pkg.xhsTitle || pkg.xiaohongshuTitle || pkg.title || "").trim();
   const xhsTitleLength = xiaohongshuTitleLength(xhsTitle);
   if (xhsTitleLength > 20) errors.push(`xiaohongshu title is ${xhsTitleLength}/20`);
@@ -300,17 +319,17 @@ export function validateXiaohongshuPackage(pkg) {
   return errors;
 }
 
-export function validateWechatChannelsPackage(pkg) {
+export function validateWechatChannelsPackage(pkg, options = {}) {
   const errors = validateCommonPackage(pkg);
-  errors.push(...validateCoverPackage(pkg, "wechat_channels"));
+  errors.push(...validateCoverPackage(pkg, "wechat_channels", options));
   if (!pkg.wechatDescription) errors.push("wechatDescription is required");
   if (!pkg.wechatTags.length) errors.push("wechatTags are required");
   return errors;
 }
 
-export function validateYoutubePackage(pkg) {
+export function validateYoutubePackage(pkg, options = {}) {
   const errors = validateCommonPackage(pkg);
-  errors.push(...validateCoverPackage(pkg, "youtube"));
+  errors.push(...validateCoverPackage(pkg, "youtube", options));
   const title = String(pkg.platformTitle?.youtube || pkg.title || "");
   if (codePointLength(title) > 100) errors.push(`youtube title is ${codePointLength(title)}/100`);
   if (!pkg.youtubeDescription) errors.push("youtubeDescription is required");

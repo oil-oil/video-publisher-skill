@@ -94,3 +94,11 @@ test("explicit operations guard cover replacement and repost", () => {
   const repost = parse(["--package", "/tmp/pkg.json", "--operation", "repost", "--confirm-new-copy"]);
   assert.equal(repost.operation, "repost");
 });
+
+test("await-cover parses path and timeout and rejects incompatible modes", () => {
+  const args = parse(["--package", "/tmp/pkg.json", "--await-cover", "/tmp/cover-state.json", "--await-cover-timeout", "180"]);
+  assert.equal(args.awaitCoverPath, path.resolve("/tmp/cover-state.json"));
+  assert.equal(args.awaitCoverTimeoutSec, 180);
+  assert.throws(() => parse(["--package", "/tmp/pkg.json", "--await-cover", "/tmp/c.json", "--inspect-only"]), /--await-cover cannot be combined/);
+  assert.throws(() => parse(["--package", "/tmp/pkg.json", "--job-id", "j1", "--await-cover", "/tmp/c.json", "--replace-cover"]), /--await-cover cannot be combined/);
+});

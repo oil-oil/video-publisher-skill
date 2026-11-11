@@ -81,6 +81,8 @@ Options:
 --job-id <id>
 --check-concurrency <positive integer>
 --upload-concurrency <positive integer>
+--await-cover <manifest.json>   start inspect/upload/prefill immediately and await per-platform covers before mutate
+--await-cover-timeout <seconds> timeout for --await-cover (default: 360)
 --fresh-space              (default) new Ego space for a new job
 --reuse-space              keep the recorded space name; also --no-fresh-space
 --force-fresh-space        new space even when resuming an in-progress job

@@ -23,7 +23,42 @@ async function hashFile(filePath) {
   return hash.digest("hex");
 }
 
-export async function buildIdentity(pkg) {
+async function resolveVideoIdentity(videoPath, cachedVideo = null) {
+  const stat = await fs.promises.stat(videoPath);
+  if (cachedVideo
+    && path.resolve(String(cachedVideo.path || "")) === videoPath
+    && Number(cachedVideo.size) === stat.size
+    && /^[0-9a-f]{64}$/.test(String(cachedVideo.sha256 || ""))) {
+    return { path: videoPath, size: stat.size, sha256: String(cachedVideo.sha256) };
+  }
+  try {
+    const stem = path.basename(videoPath, path.extname(videoPath));
+    const dir = path.dirname(videoPath);
+    const sidecarCandidates = [
+      path.join(dir, `${stem}.video-fingerprint.json`),
+      path.join(dir, `${stem}.auto-publish.json`),
+    ];
+    for (const sidecarPath of sidecarCandidates) {
+      if (!fs.existsSync(sidecarPath)) continue;
+      const statBig = await fs.promises.stat(videoPath, { bigint: true });
+      const sidecar = JSON.parse(await fs.promises.readFile(sidecarPath, "utf8"));
+      const fp = sidecar?.sourceFingerprint || sidecar;
+      if (fp
+        && path.resolve(String(fp.path || "")) === videoPath
+        && Number(fp.size) === stat.size
+        && String(fp.mtimeNs || "") === String(statBig.mtimeNs)
+        && /^[0-9a-f]{64}$/.test(String(fp.sha256 || ""))) {
+        return { path: videoPath, size: stat.size, sha256: String(fp.sha256) };
+      }
+    }
+  } catch {
+    // Fall back to full file hashing on any sidecar read/parse mismatch.
+  }
+  return { path: videoPath, size: stat.size, sha256: await hashFile(videoPath) };
+}
+
+export async function buildIdentity(pkg, options = {}) {
+  const allowMissingCoverAssets = options.allowMissingCoverAssets === true;
   const videoPath = path.resolve(pkg.videoPath);
   const platformCovers = pkg.cover?.platforms || {};
   const paths = [...new Set([
@@ -32,9 +67,14 @@ export async function buildIdentity(pkg) {
     pkg.cover?.horizontal16x9Path,
     ...Object.values(platformCovers).flatMap(value => [value?.vertical3x4Path, value?.horizontal4x3Path, value?.horizontal16x9Path]),
   ].filter(Boolean).map(value => path.resolve(value)))];
-  const video = { path: videoPath, size: (await fs.promises.stat(videoPath)).size, sha256: await hashFile(videoPath) };
+  const video = await resolveVideoIdentity(videoPath, options.cachedVideo || null);
   const assets = [];
+  const missingCoverPaths = [];
   for (const assetPath of paths) {
+    if (allowMissingCoverAssets && !fs.existsSync(assetPath)) {
+      missingCoverPaths.push(assetPath);
+      continue;
+    }
     const stat = await fs.promises.stat(assetPath);
     assets.push({ path: assetPath, size: stat.size, sha256: await hashFile(assetPath) });
   }
@@ -79,5 +119,5 @@ export async function buildIdentity(pkg) {
   const legacyFingerprint = digest({ package: legacyPackage, video, assets: legacyAssets });
   const previousFingerprint = digest({ package: legacyPackage, video, assets: sharedAssets });
   const fingerprint = digest({ package: pkg, video, assets });
-  return { fingerprint, previousFingerprint, legacyFingerprint, contentFingerprint, coverFingerprint, coverFingerprints, video, assets, cover };
+  return { fingerprint, previousFingerprint, legacyFingerprint, contentFingerprint, coverFingerprint, coverFingerprints, video, assets, missingCoverPaths, cover };
 }

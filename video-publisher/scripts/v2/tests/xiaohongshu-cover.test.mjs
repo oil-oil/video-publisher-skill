@@ -100,3 +100,18 @@ test('主页面 URL 已变化但裁剪弹窗未关闭时不得生成回执', asy
   assert.equal(result.receipt, undefined);
   assert.match(result.reason, /editor did not close/);
 });
+
+test('恢复草稿只接受同一资源ID及本Job已验证回执，不凭泛化文件名判断上传完成', async () => {
+  const state = {title:'测试标题', uploaded:false, filenameVisible:false, restoredDraft:true, videoDuration:30,
+    selected:['AI工具'], plainResidue:[], duplicate:[], originalEnabled:true, activeDialogs:[],
+    coverBg:'url("https://sns-creator-preview.xhscdn.com/spectrum/same-resource?sign=new")'};
+  const inspect = new AsyncFunction('pkg','videoPath','expectedReceipts','jobFingerprint','activeTaskSpace','js','inspectFinalButtons','PLATFORM_URLS','okGate','failedGate',`${source}\nreturn await inspectXiaohongshu();`);
+  const receipt = {assetPath:'/fixture/cover.png',ratio:'3:4',cropVerified:true,afterUrl:'https://ros-preview.xhscdn.com/spectrum/same-resource?sign=old'};
+  const run = (fingerprint='bound-job', cover=receipt) => inspect(pkg,'/fixture/video.mp4',{cover},fingerprint,{id:7},async()=>({...state}),async()=>[{buttonish:true,disabled:false}],{xiaohongshu:'https://example.test/'},e=>({ok:true,evidence:e}),e=>({ok:false,evidence:e}));
+  assert.equal((await run()).gates.video.ok,true);
+  assert.equal((await run('')).gates.video.ok,false,'无Job指纹不能恢复');
+  assert.equal((await run('bound-job',{...receipt,afterUrl:'https://ros-preview.xhscdn.com/spectrum/other-resource'})).gates.video.ok,false);
+  assert.equal((await run('bound-job',{...receipt,afterUrl:'https://example.test/spectrum/same-resource'})).gates.cover.ok,false);
+  state.title='其他片';
+  assert.equal((await run()).gates.video.ok,false);
+});

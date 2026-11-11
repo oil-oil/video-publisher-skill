@@ -7,12 +7,12 @@ const source = fs.readFileSync(new URL('../platforms/douyin.mjs', import.meta.ur
 const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
 const pkg = {platformTitle:{douyin:'视频标题'},douyinDescription:'视频标题',douyinTopics:['AI工具'],cover:{uploadCustomCover:false}};
 
-async function inspectFixture({uploading=true,topicVisible=true}={}) {
+async function inspectFixture({uploading=true,topicVisible=true,extraTopics=[]}={}) {
   const rect=()=>({width:400,height:50});
   const title={placeholder:'填写作品标题',value:'视频标题',getBoundingClientRect:rect};
   const topic={innerText:'#添加话题',getBoundingClientRect:()=>({width:topicVisible?80:0,height:30})};
   const editor={innerText:'视频标题 #AI工具',className:'editor',getBoundingClientRect:rect,
-    querySelectorAll:()=>[{innerText:'#AI工具'}],
+    querySelectorAll:()=>[{innerText:'#AI工具'},...extraTopics.map(topic=>({innerText:'#'+topic}))],
     cloneNode:()=>({innerText:'视频标题',querySelectorAll:()=>[]})};
   const document={body:{innerText:uploading?'基础信息 上传过程中':'基础信息 上传成功'},querySelectorAll(selector){
     if(selector==='input')return [title];
@@ -39,4 +39,10 @@ test('上传完成的独立观察不再读取或报告同步设置状态',async(
   assert.equal(result.gates.title.ok,true);
   assert.equal(result.gates.tags.ok,true);
   assert.equal(result.gates.settings,undefined);
+});
+
+test('所需话题齐全时，额外或重复的无关实体仍阻止就绪',async()=>{
+  const result=await inspectFixture({uploading:false,extraTopics:['m4pro芯片','m4pro芯片']});
+  assert.equal(result.gates.tags.ok,false);
+  assert.deepEqual(Array.from(result.gates.tags.evidence.unexpected),['m4pro芯片','m4pro芯片']);
 });

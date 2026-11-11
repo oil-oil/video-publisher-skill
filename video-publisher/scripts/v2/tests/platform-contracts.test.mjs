@@ -234,6 +234,14 @@ test("YouTube final guard covers localized Save, Publish, and Schedule labels on
   assert.match(source, /platform === 'youtube' \? YOUTUBE_FINAL_TEXT : FINAL_TEXT/);
 });
 
+test("Chinese scheduled final buttons remain protected", () => {
+  const source = fs.readFileSync(path.join(PLATFORM_DIR, '..', 'ego', 'core.mjs'), 'utf8');
+  const definition = source.match(/const FINAL_TEXT = (\/.*\/);/)[1];
+  const expression = Function(`return (${definition});`)();
+  for (const label of ['发布', '发表', '定时发布', '定时发表']) assert.equal(expression.test(label), true);
+  for (const label of ['立即发布设置', '声明原创', '确定']) assert.equal(expression.test(label), false);
+});
+
 test("YouTube corrections can clear all tags and replace a stale details receipt", () => {
   const source = fs.readFileSync(path.join(PLATFORM_DIR, "youtube.mjs"), "utf8");
   assert.match(source, /for \(const tag of youtubeTags\)/, "an empty requested list must skip additions after removing old chips");

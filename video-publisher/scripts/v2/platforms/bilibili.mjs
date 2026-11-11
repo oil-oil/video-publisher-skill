@@ -215,11 +215,41 @@ async function rebuildBilibiliTagsV2(){
   return after.gates.tags.ok?{ok:true,removed,attempts}:{ok:false,reason:'bilibili tag set is not exact',removed,attempts,evidence:after.gates.tags.evidence};
 }
 
+async function confirmBilibiliCoverSyncV2(){
+  const control=await js(String.raw`(() => {
+    const compact=value=>String(value||'').replace(/\s+/g,' ').trim();
+    const visible=el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>20&&r.height>15&&s.display!=='none'&&s.visibility!=='hidden'&&Number(s.opacity||1)>0};
+    const dialog=[...document.querySelectorAll('.bcc-dialog,.bcc-modal,[role="dialog"]')].find(el=>visible(el)&&/检测到个人空间封面（16:9）未修改/.test(compact(el.innerText||el.textContent||''))&&/4:3封面/.test(compact(el.innerText||el.textContent||'')));
+    if(!dialog)return null;
+    const button=[...dialog.querySelectorAll('button,[role="button"],div,span')].filter(el=>visible(el)&&compact(el.innerText||el.textContent||'')==='确认同步'&&!el.disabled&&el.getAttribute('aria-disabled')!=='true').sort((a,b)=>a.getBoundingClientRect().width*a.getBoundingClientRect().height-b.getBoundingClientRect().width*b.getBoundingClientRect().height)[0];
+    if(!button)return null;
+    button.id='vp2-bili-cover-sync-confirm';
+    return {selector:'#vp2-bili-cover-sync-confirm',text:'确认同步'};
+  })()`);
+  if(!control)return {clicked:false};
+  await click(control.selector,{label:'confirm bilibili cover synchronization'});
+  await wait(1);
+  return {clicked:true};
+}
+
 async function uploadBilibiliCoverV2(){
   if(!bilibiliCustomCover)return {ok:true,skipped:true};
+  await confirmBilibiliCoverSyncV2();
   const before=(await inspectBilibili()).gates.cover.evidence?.urls||[];
-  const opened=await js(String.raw`(() => {const c=v=>String(v||'').replace(/\s+/g,' ').trim();const active=[...document.querySelectorAll('.bcc-dialog,.bcc-modal,[role="dialog"]')].find(el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>20&&r.height>20&&s.display!=='none'&&s.visibility!=='hidden'&&/封面/.test(c(el.innerText||el.textContent||''))});if(active)return {ok:true,alreadyOpen:true};const target=[...document.querySelectorAll('button,[role="button"],div,span')].filter(el=>/^(更换封面|封面设置|上传封面|添加主封面|添加封面)$/.test(c(el.innerText||el.textContent||''))&&el.getBoundingClientRect().width>8).sort((a,b)=>a.getBoundingClientRect().width*a.getBoundingClientRect().height-b.getBoundingClientRect().width*b.getBoundingClientRect().height)[0];if(!target)return {ok:false,reason:'bilibili cover entry missing'};target.click();return {ok:true}})()`);
+  const opened=await js(String.raw`(() => {
+    const compact=value=>String(value||'').replace(/\s+/g,' ').trim();
+    const visible=el=>{if(!el)return false;const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>8&&r.height>8&&s.display!=='none'&&s.visibility!=='hidden'&&Number(s.opacity||1)>0};
+    const active=[...document.querySelectorAll('.bcc-dialog,.bcc-modal,[role="dialog"]')].find(el=>visible(el)&&/封面制作/.test(compact(el.innerText||el.textContent||'')));
+    if(active)return {ok:true,alreadyOpen:true};
+    const main=document.querySelector('.cover .cover-module-main .cover-img');
+    const target=visible(main)?main:[...document.querySelectorAll('button,[role="button"],div,span')].filter(el=>visible(el)&&/^(更换封面|封面设置|上传封面|添加主封面|添加封面)$/.test(compact(el.innerText||el.textContent||''))).sort((a,b)=>a.getBoundingClientRect().width*a.getBoundingClientRect().height-b.getBoundingClientRect().width*b.getBoundingClientRect().height)[0];
+    if(!target)return {ok:false,reason:'bilibili cover entry missing'};
+    target.id='vp2-bili-cover-open';
+    target.scrollIntoView({block:'center',inline:'center'});
+    return {ok:true,selector:'#vp2-bili-cover-open'};
+  })()`);
   if(!opened.ok)return opened;
+  if(opened.selector){await wait(.3);await click(opened.selector,{label:'open bilibili main cover editor'});}
   await wait(2);
   const exposed=await js(String.raw`(() => {const input=[...document.querySelectorAll('.bcc-upload-wrapper input[type=file],input[type=file]')].find(el=>/image|png|jpe?g/i.test(el.accept||''));if(!input)return {ok:false,reason:'bilibili cover image input missing'};input.id='vp2-bili-cover';return {ok:true,selector:'#vp2-bili-cover'}})()`);
   if(!exposed.ok)return exposed;
@@ -240,8 +270,10 @@ async function uploadBilibiliCoverV2(){
   }
   let after=[];
   let dialogClosed=false;
+  let syncConfirmed=false;
   for(let poll=0;poll<60;poll+=1){
     await wait(.5);
+    if(!syncConfirmed)syncConfirmed=(await confirmBilibiliCoverSyncV2()).clicked;
     const state=await inspectBilibili();
     after=state.gates.cover.evidence?.urls||[];
     dialogClosed=state.gates.noBlockingDialog.ok;
@@ -254,7 +286,7 @@ async function uploadBilibiliCoverV2(){
   const afterUrl=after.find(url=>!before.includes(url))||after.find(url=>/archive\.biliimg|biliimg/.test(url))||after[0];
   if(!dialogClosed)return {ok:false,reason:'bilibili cover editor did not close after confirmation',before,after,frameworkFallbackUsed};
   if(!afterUrl)return {ok:false,reason:'bilibili main cover did not expose CDN receipt',before,after};
-  return {ok:true,frameworkFallbackUsed,primaryClickError,receipt:{assetPath:bilibiliCoverPath,ratio:'4:3',slots:['homepage-4:3','space-16:9'],beforeUrls:before,afterUrl}};
+  return {ok:true,frameworkFallbackUsed,primaryClickError,syncConfirmed,receipt:{assetPath:bilibiliCoverPath,ratio:'4:3',slots:['homepage-4:3','space-16:9'],beforeUrls:before,afterUrl}};
 }
 
 async function ensureBilibiliEarlyMetadata(before){

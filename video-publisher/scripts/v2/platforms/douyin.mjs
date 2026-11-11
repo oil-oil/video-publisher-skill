@@ -37,6 +37,7 @@ async function inspectDouyin() {
     const tokenCounts=Object.fromEntries(requestedTopics.map(tag=>[tag,entityNames.filter(name=>name===normalizeTopic(tag)).length]))
     const selected = requestedTopics.filter(tag=>tokenCounts[tag]===1)
     const duplicates = requestedTopics.filter(tag=>tokenCounts[tag]>1)
+    const unexpected = entityNames.filter(name=>!requestedTopics.some(tag=>normalizeTopic(tag)===name))
     const clone = editor?.cloneNode(true)
     clone?.querySelectorAll('[data-mention], [data-fake-text], [class*="mention"], [class*="topic"], [class*="hash"]').forEach(el=>el.remove())
     let proseRaw=String(clone?.innerText||clone?.textContent||'').replace(/\u200b/g,' ')
@@ -66,7 +67,7 @@ async function inspectDouyin() {
     const dialogs=[...document.querySelectorAll('[role="dialog"],.semi-modal,[class*="modal-mask"],[class*="dialog-mask"]')]
       .map(el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return {text:compact(el.innerText||el.textContent||'').slice(0,500),cls:String(el.className||''),w:r.width,h:r.height,display:s.display,visibility:s.visibility,opacity:s.opacity}})
       .filter(item=>item.w>20&&item.h>20&&item.display!=='none'&&item.visibility!=='hidden'&&!/animate-hide|leave-active/.test(item.cls))
-    return {text:text.slice(0,2800),title,editorText,prose,selected,plainResidue,duplicates,tokenCounts,uploadSucceeded,uploading,uploadFailed,loginRequired,resumeDialog,identityMatches,identityEmpty,knownMisroutedInput,topicControlReady,earlyMutationReady,titleInputReady:visible(titleInput),editorReady:visible(editor),coverUrls,dialogs}
+    return {text:text.slice(0,2800),title,editorText,prose,selected,plainResidue,duplicates,unexpected,entityNames,tokenCounts,uploadSucceeded,uploading,uploadFailed,loginRequired,resumeDialog,identityMatches,identityEmpty,knownMisroutedInput,topicControlReady,earlyMutationReady,titleInputReady:visible(titleInput),editorReady:visible(editor),coverUrls,dialogs}
   })(${JSON.stringify(douyinTitle)}, ${JSON.stringify(douyinDescription)}, ${JSON.stringify(douyinTopics)})`);
   const buttons = await inspectFinalButtons(/^发布$/);
   const finalButton = buttons.find(button=>button.buttonish) || buttons[0] || null;
@@ -84,7 +85,7 @@ async function inspectDouyin() {
       video: state.uploadSucceeded && !state.uploading && !state.uploadFailed ? okGate({stable:true}) : failedGate({uploaded:state.uploadSucceeded,uploading:state.uploading,failed:state.uploadFailed,resumeDialog:state.resumeDialog}),
       title: state.title===douyinTitle ? okGate({expected:douyinTitle,actual:state.title}) : failedGate({expected:douyinTitle,actual:state.title}),
       description: state.prose===douyinDescription ? okGate({expected:douyinDescription,actual:state.prose}) : failedGate({expected:douyinDescription,actual:state.prose,editorText:state.editorText}),
-      tags: state.selected.length===douyinTopics.length&&!state.plainResidue.length&&!state.duplicates.length ? okGate({requested:douyinTopics,selected:state.selected,tokenCounts:state.tokenCounts}) : failedGate({requested:douyinTopics,selected:state.selected,plainResidue:state.plainResidue,duplicates:state.duplicates,tokenCounts:state.tokenCounts,editorText:state.editorText}),
+      tags: state.selected.length===douyinTopics.length&&!state.plainResidue.length&&!state.duplicates.length&&!state.unexpected.length ? okGate({requested:douyinTopics,selected:state.selected,entities:state.entityNames,tokenCounts:state.tokenCounts}) : failedGate({requested:douyinTopics,selected:state.selected,entities:state.entityNames,unexpected:state.unexpected,plainResidue:state.plainResidue,duplicates:state.duplicates,tokenCounts:state.tokenCounts,editorText:state.editorText}),
       cover: coverReceiptOk||defaultCoverOk ? okGate({custom:douyinCustomCover,urls:state.coverUrls,receipt}) : failedGate({custom:douyinCustomCover,urls:state.coverUrls,receipt,reason:douyinCustomCover&&!receipt?'custom cover receipt missing':'cover not verified'}),
       noBlockingDialog: state.dialogs.length===0 ? okGate({active:[]}) : failedGate({active:state.dialogs}),
       finalButton: finalButton&&!finalButton.disabled ? okGate(finalButton) : failedGate({buttons}),
@@ -274,10 +275,15 @@ async function focusDouyinEditorEnd() {
 async function clearAndFillDouyinBody() {
   let located=await locateDouyinEditor();if(!located.ok)return located;
   for(let attempt=0;attempt<3;attempt+=1){
-    try{await click([located.point.x,located.point.y],{label:'focus douyin body'})}catch(error){return {ok:false,reason:String(error?.message||error)}}
+    try{await click(located.selector,{label:'focus douyin body'})}catch(error){return {ok:false,reason:String(error?.message||error)}}
     const selected=await js(String.raw`(() => {const editor=document.querySelector('#vp2-douyin-editor');if(!editor)return{ok:false,reason:'douyin editor lost while selecting body'};editor.focus();const selection=window.getSelection(),range=document.createRange();range.selectNodeContents(editor);selection.removeAllRanges();selection.addRange(range);const active=document.activeElement;return{ok:active===editor||editor.contains(active),activeTag:active?.tagName||'',activeId:active?.id||''}})()`);
     if(!selected.ok)return {ok:false,reason:'douyin description editor did not retain selection focus',evidence:selected};
-    await pressKey('Backspace').catch(()=>{});await wait(.7);
+    const modifiers=process.platform==='darwin'?4:2;
+    await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'a',code:'KeyA',windowsVirtualKeyCode:65,modifiers,commands:['selectAll']});
+    await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'a',code:'KeyA',windowsVirtualKeyCode:65,modifiers});
+    await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Backspace',code:'Backspace',windowsVirtualKeyCode:8});
+    await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Backspace',code:'Backspace',windowsVirtualKeyCode:8});
+    await wait(.7);
     located=await locateDouyinEditor();if(!String(located.text||'').replace(/[\s\u200b]/g,''))break;
   }
   const cleared=await locateDouyinEditor();if(String(cleared.text||'').replace(/[\s\u200b]/g,''))return {ok:false,reason:'douyin description editor did not clear',text:cleared.text};
@@ -308,7 +314,8 @@ async function removeDouyinTrailingTopicQuery(tag, expectedCommitted = []) {
   if(!initial){
     const after=await inspectDouyin();
     const selected=after.gates.tags.evidence?.selected||[];
-    const entitiesUnchanged=selected.length===expectedCommitted.length&&selected.every((value,index)=>normalizeDouyinTopic(value)===normalizeDouyinTopic(expectedCommitted[index]));
+    const entities=after.gates.tags.evidence?.entities||selected;
+    const entitiesUnchanged=entities.length===expectedCommitted.length&&entities.every((value,index)=>normalizeDouyinTopic(value)===normalizeDouyinTopic(expectedCommitted[index]));
     return after.gates.description.ok&&entitiesUnchanged
       ? {ok:true,alreadyClean:true,before}
       : {ok:false,reason:'douyin empty topic tail did not preserve exact prose and committed entities',description:after.gates.description.evidence,selected,expectedCommitted};
@@ -327,7 +334,8 @@ async function removeDouyinTrailingTopicQuery(tag, expectedCommitted = []) {
   }
   const after=await inspectDouyin();
   const selected=after.gates.tags.evidence?.selected||[];
-  const entitiesUnchanged=selected.length===expectedCommitted.length&&selected.every((value,index)=>normalizeDouyinTopic(value)===normalizeDouyinTopic(expectedCommitted[index]));
+  const entities=after.gates.tags.evidence?.entities||selected;
+  const entitiesUnchanged=entities.length===expectedCommitted.length&&entities.every((value,index)=>normalizeDouyinTopic(value)===normalizeDouyinTopic(expectedCommitted[index]));
   const tail=await inspectDouyinTrailingPlainText();
   const clean=!String(tail.trimmed||'').startsWith('#');
   return clean&&entitiesUnchanged&&after.gates.description.ok
@@ -340,11 +348,15 @@ async function addDouyinTopic(tag) {
   const findRow=()=>js(String.raw`((tag) => {
     const c=v=>String(v||'').replace(/\s+/g,' ').trim();const expected='#'+String(tag).toLowerCase();
     const visible=el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'};
-    const direct=[...document.querySelectorAll('[class*="mention-suggest-item-container"]')].filter(visible).map(el=>({el,text:c(el.innerText||el.textContent||''),r:el.getBoundingClientRect()})).filter(item=>item.r.height>20&&item.r.height<90&&item.r.width>150&&(item.text.toLowerCase()===expected||item.text.toLowerCase().startsWith(expected+' ')));
+    const exactRow=item=>item.r.height>20&&item.r.height<90&&item.r.width>150&&(item.text.match(/#/g)||[]).length===1&&(item.text.toLowerCase()===expected||item.text.toLowerCase().startsWith(expected+' '));
+    const direct=[...document.querySelectorAll('[class*="mention-suggest-item-container"]')].filter(visible).map(el=>({el,text:c(el.innerText||el.textContent||''),r:el.getBoundingClientRect()})).filter(exactRow);
     const containers=[...document.querySelectorAll('.mention-suggest-mount-dom')].filter(visible);
-    const legacy=containers.flatMap(container=>[...container.querySelectorAll('*')]).map(el=>({el,text:c(el.innerText||el.textContent||''),r:el.getBoundingClientRect()})).filter(item=>item.r.height>20&&item.r.height<90&&item.r.width>150&&(item.text.toLowerCase()===expected||item.text.toLowerCase().startsWith(expected+' ')));
+    const legacy=containers.flatMap(container=>[...container.querySelectorAll('*')]).map(el=>({el,text:c(el.innerText||el.textContent||''),r:el.getBoundingClientRect()})).filter(exactRow);
     const item=(direct.length?direct:legacy).sort((a,b)=>a.text.length-b.text.length||a.r.width*a.r.height-b.r.width*b.r.height)[0];
-    return item?{x:item.r.left+Math.min(56,item.r.width/3),y:item.r.top+item.r.height/2,text:item.text,direct:direct.includes(item)}:null;
+    if(!item)return null;
+    document.querySelectorAll('#vp2-douyin-exact-topic').forEach(el=>el.removeAttribute('id'));
+    item.el.id='vp2-douyin-exact-topic';
+    return {selector:'#vp2-douyin-exact-topic',text:item.text,direct:direct.includes(item)};
   })(${JSON.stringify(queryTag)})`);
   const attempts=[];
   for(let attempt=1;attempt<=3;attempt+=1){
@@ -378,21 +390,13 @@ async function addDouyinTopic(tag) {
       if(!cleanup.ok)return {ok:false,reason:cleanup.reason,tag,attempts};
       await wait(1.5*attempt);continue;
     }
-    try{await click([row.x,row.y],{label:`commit douyin topic ${tag}`})}catch(error){return {ok:false,reason:String(error?.message||error),tag,attempts}}
+    try{await click(row.selector,{label:`commit douyin topic ${tag}`})}catch(error){return {ok:false,reason:String(error?.message||error),tag,attempts}}
     await wait(1.4);
     let state=await inspectDouyin();let committed=(state.gates.tags.evidence?.selected||[]).some(value=>normalizeDouyinTopic(value)===normalizeDouyinTopic(tag));
-    if(!committed){
-      const refocused=await focusDouyinEditorEnd();
-      if(refocused.ok){
-        await pressKey('ArrowDown').catch(()=>{});await wait(.25);
-        await pressKey('Enter').catch(()=>{});await wait(1.2);
-        state=await inspectDouyin();committed=(state.gates.tags.evidence?.selected||[]).some(value=>normalizeDouyinTopic(value)===normalizeDouyinTopic(tag));
-      }
-    }
-    if(!committed){const retry=await findRow();if(retry){await click([retry.x,retry.y],{label:`retry douyin topic ${tag}`}).catch(()=>{});await wait(1.2);state=await inspectDouyin();committed=(state.gates.tags.evidence?.selected||[]).some(value=>normalizeDouyinTopic(value)===normalizeDouyinTopic(tag))}}
+    if(!committed){const retry=await findRow();if(retry){await click(retry.selector,{label:`retry douyin topic ${tag}`}).catch(()=>{});await wait(1.2);state=await inspectDouyin();committed=(state.gates.tags.evidence?.selected||[]).some(value=>normalizeDouyinTopic(value)===normalizeDouyinTopic(tag))}}
     if(committed){await pressKey('ArrowRight').catch(()=>{});await cdp('Input.insertText',{text:' '}).catch(()=>{});await wait(.3);return {ok:true,text:row.text,attempts:[...attempts,{attempt,result:'committed'}]}}
     const cleanup=await removeDouyinTrailingTopicQuery(queryTag,committedBefore);
-    attempts.push({attempt,result:'entity_not_committed',cleanup,evidence:state.gates.tags.evidence});
+    attempts.push({attempt,result:'entity_not_committed',row,cleanup,evidence:state.gates.tags.evidence});
     if(!cleanup.ok)return {ok:false,reason:cleanup.reason,tag,attempts};
     await wait(1.5*attempt);
   }
@@ -402,6 +406,13 @@ async function addDouyinTopic(tag) {
 async function recoverDouyinTopicPrefix(before) {
   const evidence=before.gates.tags.evidence||{};
   const selected=evidence.selected||[];
+  if(evidence.unexpected?.length||evidence.duplicates?.length){
+    if(!(before.gates.draftIdentity.ok&&before.gates.title.ok&&before.gates.description.ok))return {ok:false,recoverable:false,reason:'douyin unexpected topic entities are not in a proven matching target editor',evidence};
+    const cleanup=await clearAndFillDouyinBody();
+    return cleanup.ok
+      ? {ok:true,recoverable:true,selected:[],nextIndex:0,cleanup,removedEntities:evidence.entities||[]}
+      : {ok:false,recoverable:true,reason:cleanup.reason,cleanup};
+  }
   const validPrefix=selected.length<douyinTopics.length&&!evidence.duplicates?.length
     &&selected.every((value,index)=>normalizeDouyinTopic(value)===normalizeDouyinTopic(douyinTopics[index]));
   const editorText=String(evidence.editorText||before.gates.description.evidence?.editorText||'').replace(/\s+/g,' ').trim();

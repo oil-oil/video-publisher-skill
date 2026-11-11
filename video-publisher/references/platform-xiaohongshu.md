@@ -15,6 +15,10 @@ no prose body unless explicitly requested
 
 Use the confirmed video file. Reuse an uploaded editor only when the filename or expected title identifies this package. A different active draft is a blocker; Xiaohongshu has no tested automatic quarantine flow.
 
+同一任务从平台草稿恢复后，文件名可能变成“视频文件.mp4”。只在原 Job 指纹、任务空间、完整标题、本 Job 已验证的封面资源及已加载视频时长同时存在时接受恢复，不凭泛化文件名或标题单独判定。预览 URL 仅允许 `ros-preview.xhscdn.com` 与 `sns-creator-preview.xhscdn.com` 间相同 `/spectrum/` 资源路径的重新签名，其他域名或资源 ID 不匹配。保留原裁剪证明，不重传已恢复视频。
+
+定时模式的最终按钮可为“定时发布”，它与“发布”同为受保护的最终提交控件；适配器只核验按钮可用，不点击。具体定时时间由调用项目的独立步骤设置和验证，不能把此处 READY 当成已核对预约时间。
+
 视频上传仍在进行时，只要 fresh inspection 同时证明标题输入框、正文话题编辑器和原生话题按钮可见，就可通过单宽 UI 队列提前填写标题和话题。原创声明、封面和最终验证仍必须等上传完成。`prefill` 不满足 video gate，之后必须继续正式 `upload` 等待。
 
 ## Topic Entities

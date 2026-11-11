@@ -76,10 +76,10 @@ async function inspectYoutube() {
     const statusText = compact(progressElements.map(element => element.innerText || element.textContent || '').join(' '))
     const uploading = /正在上传|上传中|Uploading|剩余.*(?:分钟|秒)|remaining|(?:^|\s)\d{1,3}%/i.test(statusText)
       && !/上传完毕|Upload complete/i.test(statusText)
-    const processing = /正在处理视频|处理中|Processing|检查中|Checks running|正在检查|还剩\s*\d+\s*(?:分钟|秒)/i.test(statusText)
+    const processing = /即将开始处理|处理即将开始|处理将在|正在处理视频|处理中|Processing|检查中|Checks running|正在检查|还剩\s*\d+\s*(?:分钟|秒)/i.test(statusText)
       && !/处理完毕(?!后)|Processing complete|检查完毕|Checks complete/i.test(statusText)
     const failed = /上传失败|Upload failed|处理失败|Processing failed|网络错误|文件格式不受支持/i.test(statusText || text)
-    const hasVideo = Boolean(fileNameText || selectedVideoName || filenameVisible || statusText)
+    const hasVideo = Boolean(fileNameText || selectedVideoName || filenameVisible || videoId)
     const normalizedIdentity = value => compact(value).replace(/[_-]+/g, ' ').toLowerCase()
     const identityMatches = !hasVideo
       || filenameVisible
@@ -125,7 +125,9 @@ async function inspectYoutube() {
     const paidPromotionControl = byIdOrText('#paid-promotion', /付费宣传|Paid promotion/i)
     const allowEmbeddingControl = byIdOrText('#allow-embedding', /允许嵌入|Allow embedding/i)
     const notifySubscribersControl = byIdOrText('#notify-subscribers', /通知订阅者|Notify subscribers/i)
-    const paidPromotion = checked(paidPromotionControl)
+    const paidYes=scope.querySelector('#paid-promotion tp-yt-paper-radio-button[name="VIDEO_PAID_PRODUCT_PLACEMENT_NOTIFY"]');
+    const paidNo=scope.querySelector('#paid-promotion tp-yt-paper-radio-button[name="VIDEO_PAID_PRODUCT_PLACEMENT_NO"]');
+    const paidPromotion = checked(paidYes)===true ? true : checked(paidNo)===true ? false : checked(paidPromotionControl)
     const allowEmbedding = checked(allowEmbeddingControl)
     const notifySubscribers = checked(notifySubscribersControl)
 
@@ -908,7 +910,10 @@ async function ensureYoutubeMetadata(before) {
   if (actions.audience && !actions.audience.ok) {
     return { ok: false, actions, current: await inspectYoutube(), blocker: typedBlocker('ACTION_FAILED', actions.audience.reason) };
   }
-  actions.paidPromotion = await ensureYoutubeCheckbox('#paid-promotion', /付费宣传|Paid promotion/i, youtubePaidPromotion, 'set YouTube paid promotion');
+  const paidRadioAvailable=await js(String.raw`(() => Boolean(document.querySelector('#paid-promotion tp-yt-paper-radio-button[name="VIDEO_PAID_PRODUCT_PLACEMENT_NO"]')))()`);
+  actions.paidPromotion = paidRadioAvailable
+    ? await ensureYoutubeRadio(youtubePaidPromotion?['VIDEO_PAID_PRODUCT_PLACEMENT_NOTIFY']:['VIDEO_PAID_PRODUCT_PLACEMENT_NO'],youtubePaidPromotion?/是，我的视频包含付费宣传内容/:/否，我的视频不包含付费宣传内容/,'set YouTube paid promotion')
+    : await ensureYoutubeCheckbox('#paid-promotion', /付费宣传|Paid promotion/i, youtubePaidPromotion, 'set YouTube paid promotion');
   if (!actions.paidPromotion.ok) {
     return { ok: false, actions, current: await inspectYoutube(), blocker: typedBlocker('SELECTOR_DRIFT', actions.paidPromotion.reason, { retryable: true }) };
   }

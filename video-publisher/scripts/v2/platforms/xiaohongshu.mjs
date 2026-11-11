@@ -4,6 +4,17 @@ const xhsVideoName = videoPath.split('/').pop();
 const xhsCustomCover = pkg.cover?.uploadCustomCover === true;
 const xhsCoverPath = String(pkg.cover?.vertical3x4Path || '');
 
+// 平台恢复草稿会换 CDN 域名和签名；只在可信预览域名、相同资源路径时认作同一封面。
+function xhsCoverMediaId(value) {
+  const match = String(value || '').match(/https:\/\/[^"')\s]+/);
+  if (!match) return '';
+  try {
+    const url = new URL(match[0]);
+    return ['ros-preview.xhscdn.com', 'sns-creator-preview.xhscdn.com'].includes(url.hostname)
+      && url.pathname.startsWith('/spectrum/') ? url.pathname : '';
+  } catch { return ''; }
+}
+
 async function inspectXiaohongshu() {
   const state = await js(String.raw`((expectedName, expectedTitle, requestedTopics) => {
     const compact = value => String(value || '').replace(/\s+/g, ' ').trim()
@@ -74,17 +85,26 @@ async function inspectXiaohongshu() {
       uploaded,
       controls: { title: visible(titleInput), topics: visible(editor) && visible(topicButton) },
     }
-    return { text: text.slice(0, 2600), title, editorText, selected, topicCounts, plainResidue, duplicate, originalEnabled, activeDialogs, coverBg, filenameVisible, uploaded, uploading, failed, loginRequired, earlyMutation }
+    const video = document.querySelector('video');
+    const restoredDraft = new URL(location.href).searchParams.get('useDraft') === 'true' && text.includes('视频文件.mp4');
+    return { text: text.slice(0, 2600), title, editorText, selected, topicCounts, plainResidue, duplicate, originalEnabled, activeDialogs, coverBg, filenameVisible, uploaded, uploading, failed, loginRequired, earlyMutation,
+      restoredDraft, videoDuration: Number.isFinite(video?.duration) ? video.duration : 0 }
   })(${JSON.stringify(xhsVideoName)}, ${JSON.stringify(xhsTitle)}, ${JSON.stringify(xhsTopics)})`);
-  const buttons = await inspectFinalButtons(/^(发布|发布笔记)$/);
-  const identityOk = !state.uploaded || state.filenameVisible || state.title === xhsTitle;
+  const buttons = await inspectFinalButtons(/^(发布|发布笔记|定时发布)$/);
   const receipt = expectedReceipts.cover || null;
   const receiptMatches = Boolean(receipt
     && receipt.assetPath === xhsCoverPath
     && receipt.ratio === '3:4'
     && receipt.cropVerified === true
     && receipt.afterUrl
-    && state.coverBg.includes(receipt.afterUrl));
+    && (state.coverBg.includes(receipt.afterUrl)
+      || (xhsCoverMediaId(receipt.afterUrl) && xhsCoverMediaId(receipt.afterUrl) === xhsCoverMediaId(state.coverBg))));
+  // 泛化文件名本身不证明身份；必须同时绑定原 Job 的封面回执、完整标题和已加载视频。
+  const restoredVideo = Boolean(state.restoredDraft && typeof jobFingerprint !== 'undefined' && jobFingerprint
+    && typeof activeTaskSpace !== 'undefined' && activeTaskSpace?.id
+    && state.title === xhsTitle && receiptMatches && state.videoDuration > 0 && !state.failed && !state.uploading);
+  if (restoredVideo) state.uploaded = true;
+  const identityOk = !state.uploaded || state.filenameVisible || restoredVideo || state.title === xhsTitle;
   const coverOk = xhsCustomCover
     ? receiptMatches && !state.uploading
     : Boolean(state.coverBg) && !state.uploading;
@@ -94,7 +114,7 @@ async function inspectXiaohongshu() {
       authenticated: state.loginRequired ? failedGate({ loginRequired: true }) : okGate({ url: PLATFORM_URLS.xiaohongshu }),
       draftIdentity: identityOk ? okGate({ expectedName: xhsVideoName, filenameVisible: state.filenameVisible }) : failedGate({ foreign: true, expectedName: xhsVideoName, actualTitle: state.title }),
       video: state.uploaded && !state.failed && !state.uploading
-        ? okGate({ filename: xhsVideoName, stable: true })
+        ? okGate({ filename: xhsVideoName, stable: true, restoredVideo })
         : failedGate({ filename: xhsVideoName, uploaded: state.uploaded, uploading: state.uploading, failed: state.failed }),
       title: state.title === xhsTitle ? okGate({ expected: xhsTitle, actual: state.title }) : failedGate({ expected: xhsTitle, actual: state.title }),
       tags: state.selected.length === xhsTopics.length && !state.plainResidue.length && !state.duplicate.length

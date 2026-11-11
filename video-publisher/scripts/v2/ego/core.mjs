@@ -13,7 +13,7 @@ const PLATFORM_HOSTS = {
   wechat_channels: /channels\.weixin\.qq\.com/,
   youtube: /studio\.youtube\.com|accounts\.google\.com/,
 };
-const FINAL_TEXT = /^(发布|发布笔记|发表|立即投稿)$/;
+const FINAL_TEXT = /^(发布|发布笔记|发表|立即投稿|定时发布|定时发表)$/;
 const YOUTUBE_FINAL_TEXT = /^(保存|发布|安排时间|Save|Publish|Schedule)$/i;
 const FINAL_GUARD_KEY = '__VIDEO_PUBLISHER_FINAL_GUARD__';
 let activeTaskSpace = null;
@@ -112,6 +112,13 @@ async function armFinalPublishGuard() {
       event.preventDefault()
       event.stopImmediatePropagation()
       state.blockedAttempts.push({ type: event.type, label: match.label, at: new Date().toISOString() })
+    }
+    state.releaseAfterUserAuthorization = () => {
+      document.removeEventListener('click', guard, true)
+      document.removeEventListener('submit', guard, true)
+      state.armed = false
+      state.releasedAt = new Date().toISOString()
+      return { released: true, releasedAt: state.releasedAt }
     }
     document.addEventListener('click', guard, true)
     document.addEventListener('submit', guard, true)

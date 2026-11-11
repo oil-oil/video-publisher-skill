@@ -19,6 +19,8 @@ const VALUE_FLAGS = new Set([
   "--cleanup-name",
   "--cleanup-prefix",
   "--operation",
+  "--await-cover",
+  "--await-cover-timeout",
 ]);
 
 const OPERATIONS = new Set(["auto", "create", "resume", "inspect", "replace-cover", "repost"]);
@@ -49,6 +51,8 @@ export function parsePublisherArgs(argv, context) {
     cleanupPrefixes: [],
     packagePath: "",
     taskSuffix: "",
+    awaitCoverPath: "",
+    awaitCoverTimeoutSec: 360,
   };
   const positional = [];
   const platforms = [];
@@ -79,6 +83,8 @@ export function parsePublisherArgs(argv, context) {
       else if (arg === "--space-suffix") options.spaceSuffix = value.trim();
       else if (arg === "--check-concurrency") options.checkConcurrency = positive(value, arg);
       else if (arg === "--upload-concurrency") options.uploadConcurrency = positive(value, arg);
+      else if (arg === "--await-cover") options.awaitCoverPath = path.resolve(value);
+      else if (arg === "--await-cover-timeout") options.awaitCoverTimeoutSec = positive(value, arg);
       else if (arg === "--operation") options.operation = value.trim();
       else if (arg === "--platform" || arg === "--platforms") {
         platforms.push(...value.split(",").map(item => item.trim()).filter(Boolean));
@@ -128,6 +134,9 @@ export function parsePublisherArgs(argv, context) {
   }
   if (options.operation === "repost" && !options.confirmNewCopy) {
     throw new UsageError("--operation repost requires --confirm-new-copy");
+  }
+  if (options.awaitCoverPath && (options.inspectOnly || options.cleanupOnly || options.operation === "replace-cover")) {
+    throw new UsageError("--await-cover cannot be combined with --inspect-only, --cleanup-only, or --replace-cover");
   }
   options.cleanupNames = [...new Set(options.cleanupNames.filter(Boolean))];
   options.cleanupPrefixes = [...new Set(options.cleanupPrefixes.filter(Boolean))];

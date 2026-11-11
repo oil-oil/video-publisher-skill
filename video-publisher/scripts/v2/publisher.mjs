@@ -6,7 +6,9 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   readPackage,
+  requiredCoverAspectsForPlatform,
   validateBilibiliPackage,
+  validateCoverPackage,
   validateDouyinPackage,
   validateWechatChannelsPackage,
   validateXiaohongshuPackage,
@@ -34,6 +36,11 @@ const DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = path.join(os.homedir(), ".video-publisher", "v2-jobs");
 const RIGHTS_PLATFORMS = new Set(["xiaohongshu", "bilibili", "wechat_channels"]);
 const EARLY_PREFILL_PLATFORMS = new Set(["xiaohongshu", "douyin", "bilibili", "wechat_channels", "youtube"]);
+const ASPECT_COVER_FIELD = Object.freeze({
+  "3x4": "vertical3x4Path",
+  "4x3": "horizontal4x3Path",
+  "16x9": "horizontal16x9Path",
+});
 const validators = {
   xiaohongshu: validateXiaohongshuPackage,
   douyin: validateDouyinPackage,
@@ -195,6 +202,48 @@ async function migrateLegacyIdentity(store, state, identity, args) {
   await store.save();
 }
 
+function writeJsonAtomic(filePath, payload) {
+  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
+  fs.renameSync(tempPath, filePath);
+}
+
+async function applyResolvedCoverIdentity(store, state, identity, args, operation = "deferred-cover-sync") {
+  const previousFingerprint = state.fingerprint;
+  state.schemaVersion = 4;
+  state.fingerprint = identity.fingerprint;
+  state.contentFingerprint = identity.contentFingerprint;
+  state.coverFingerprint = identity.coverFingerprint;
+  state.coverFingerprints = identity.coverFingerprints;
+  state.cover = identity.cover;
+  state.packagePath = args.packagePath;
+  state.video = identity.video;
+  state.assets = identity.assets;
+  if (previousFingerprint && previousFingerprint !== identity.fingerprint) {
+    state.revisions ||= [];
+    state.revisions.push({ at: new Date().toISOString(), operation, from: previousFingerprint, to: identity.fingerprint, packagePath: args.packagePath });
+    if (state.revisions.length > 20) state.revisions = state.revisions.slice(-20);
+  }
+  for (const [platform, item] of Object.entries(state.platforms || {})) {
+    if (item.videoReceipt) item.videoReceipt = { ...item.videoReceipt, fingerprint: identity.fingerprint };
+    item.receipts ||= {};
+    if (item.receipts.uploadStart?.fingerprint) {
+      item.receipts.uploadStart = { ...item.receipts.uploadStart, fingerprint: identity.fingerprint };
+    }
+    const checkpointPath = store.receiptCheckpointPath(platform);
+    if (fs.existsSync(checkpointPath)) {
+      try {
+        const checkpoint = JSON.parse(await fs.promises.readFile(checkpointPath, "utf8"));
+        if (checkpoint && typeof checkpoint === "object") {
+          checkpoint.fingerprint = identity.fingerprint;
+          writeJsonAtomic(checkpointPath, checkpoint);
+        }
+      } catch {}
+    }
+  }
+  await store.save();
+}
+
 async function persistKeepSpace(store, state, args, closeCurrent) {
   if (args.keepSpace) state.keepSpace = true;
   else if (closeCurrent) state.keepSpace = false;
@@ -236,10 +285,11 @@ async function main() {
     return;
   }
   if (!fs.existsSync(args.packagePath)) throw new Error(`Package JSON not found: ${args.packagePath}`);
-  const pkg = readPackage(args.packagePath);
+  let pkg = readPackage(args.packagePath);
+  const deferCoverStartup = Boolean(args.awaitCoverPath && pkg.cover?.uploadCustomCover === true);
   const media = inspectMediaFile(pkg.videoPath);
   const preflightErrors = Object.fromEntries(args.platforms.map(platform => [platform, [
-    ...validators[platform](pkg),
+    ...validators[platform](pkg, { skipCoverFiles: deferCoverStartup }),
     ...validateMediaForPlatform(pkg, platform, media),
   ]]));
   const runnablePlatforms = args.platforms.filter(platform => preflightErrors[platform].length === 0);
@@ -253,10 +303,11 @@ async function main() {
   if (!args.inspectOnly && rightsTargets.length && !standingOriginalityPolicy && !args.originalRightsConfirmed) {
     throw new UsageError(`Originality confirmation is required before browser mutation for: ${rightsTargets.join(", ")}. Complete onboarding with declarations.originalityPolicy=all_videos_original, or confirm this run and add --confirm-original-rights.`);
   }
-  const identity = await buildIdentity(pkg);
+  let identity = await buildIdentity(pkg, { allowMissingCoverAssets: true });
+  const defaultIdSeed = deferCoverStartup ? identity.contentFingerprint : identity.fingerprint;
   const jobId = args.jobId || (args.operation === "repost"
-    ? `${identity.fingerprint.slice(0, 12)}-${uniqueSpaceSuffix()}`
-    : identity.fingerprint.slice(0, 16));
+    ? `${defaultIdSeed.slice(0, 12)}-${uniqueSpaceSuffix()}`
+    : defaultIdSeed.slice(0, 16));
   const jobDir = path.join(args.stateRoot, jobId);
   const stateExisted = fs.existsSync(path.join(jobDir, "state.json"));
   if (args.operation === "replace-cover" && !stateExisted) throw new UsageError(`replace-cover job does not exist: ${jobId}`);
@@ -270,13 +321,34 @@ async function main() {
   publisherLockToken = publisherRelease.token;
   activeLockReleases.push(publisherRelease);
   activeLockReleases.push(acquireJobLock(jobDir, { jobId, packagePath: args.packagePath }));
+  let deferredAcceptedFingerprints = [];
+  if (stateExisted && args.operation !== "replace-cover") {
+    try {
+      const storedPreview = JSON.parse(fs.readFileSync(path.join(jobDir, "state.json"), "utf8"));
+      if (storedPreview?.fingerprint
+        && (storedPreview.awaitingCover === true || deferCoverStartup)
+        && storedPreview.contentFingerprint === identity.contentFingerprint
+        && sameVideo(storedPreview.video, identity.video)) {
+        deferredAcceptedFingerprints = [storedPreview.fingerprint];
+      }
+    } catch {}
+  }
   const expectedState = initialState(jobId, identity, args);
+  if (deferCoverStartup) expectedState.awaitingCover = true;
   if (args.operation === "replace-cover") expectedState.fingerprint = null;
   const store = new JobStore(jobDir, expectedState, {
-    acceptedFingerprints: args.operation === "replace-cover" ? [] : [identity.previousFingerprint, identity.legacyFingerprint],
+    acceptedFingerprints: args.operation === "replace-cover"
+      ? []
+      : [identity.previousFingerprint, identity.legacyFingerprint, ...deferredAcceptedFingerprints],
   });
   const state = await store.initialize();
-  if (args.operation !== "replace-cover") await migrateLegacyIdentity(store, state, identity, args);
+  if (args.operation !== "replace-cover") {
+    if (deferredAcceptedFingerprints.includes(state.fingerprint) && state.fingerprint !== identity.fingerprint) {
+      await applyResolvedCoverIdentity(store, state, identity, args, "deferred-cover-resume");
+    } else {
+      await migrateLegacyIdentity(store, state, identity, args);
+    }
+  }
   const incomingStatus = state.status;
   const incomingInProgress = IN_PROGRESS_STATUSES.includes(incomingStatus);
   if (args.operation === "auto" && stateExisted && incomingStatus === "ready") {
@@ -292,6 +364,8 @@ async function main() {
     state.coverFingerprint ||= identity.coverFingerprint;
     state.coverFingerprints ||= identity.coverFingerprints;
     state.cover ||= identity.cover;
+    if (deferCoverStartup) state.awaitingCover = true;
+    else if (!identity.missingCoverPaths?.length) state.awaitingCover = false;
   }
   if (args.operation === "inspect" && stateExisted) args.freshSpace = false;
   if (args.keepSpace) state.keepSpace = true;
@@ -392,9 +466,12 @@ async function main() {
   let inputChannelBroken = false;
   let userControl = false;
   const verifiedPlatforms = new Set();
+  const resolvedCoverPlatforms = new Set();
+  const coverSyncQueue = new SerialQueue();
   async function invoke(platform, phase) {
     const item = state.platforms[platform];
     const previousTaskSpaceId = item.taskSpaceId;
+    const invokedFingerprint = state.fingerprint;
     const runnerArgs = [runnerPath, platform, args.packagePath, phase, `${args.taskSuffix}-${jobId}`, item.taskSpaceId ? String(item.taskSpaceId) : ""];
     if (args.originalRightsConfirmed) runnerArgs.push("--confirm-original-rights");
     const execution = await runCapture(process.execPath, runnerArgs, {
@@ -402,10 +479,11 @@ async function main() {
         ...process.env,
         VIDEO_PUBLISHER_V2_RECEIPTS: JSON.stringify(item.receipts || {}),
         VIDEO_PUBLISHER_V2_CHECKPOINT_PATH: store.receiptCheckpointPath(platform),
-        VIDEO_PUBLISHER_V2_FINGERPRINT: state.fingerprint,
+        VIDEO_PUBLISHER_V2_FINGERPRINT: invokedFingerprint,
         VIDEO_PUBLISHER_V2_TASK_NAME: item.taskSpaceName || "",
         VIDEO_PUBLISHER_V2_VIDEO_RECEIPT: JSON.stringify(item.videoReceipt || null),
         VIDEO_PUBLISHER_V2_PUBLISHER_LOCK_TOKEN: publisherLockToken,
+        VIDEO_PUBLISHER_V2_DEFER_COVER: deferCoverStartup && !resolvedCoverPlatforms.has(platform) && phase !== "mutate" ? "1" : "0",
       },
     });
     const observation = parseV2Result(`${execution.stdout}\n${execution.stderr}`);
@@ -428,7 +506,24 @@ async function main() {
       };
     }
     if (observation.receipts) {
-      item.receipts = { ...(item.receipts || {}), ...observation.receipts };
+      const mergedReceipts = { ...(item.receipts || {}), ...observation.receipts };
+      if (mergedReceipts.uploadStart?.fingerprint === invokedFingerprint && state.fingerprint !== invokedFingerprint) {
+        mergedReceipts.uploadStart = { ...mergedReceipts.uploadStart, fingerprint: state.fingerprint };
+        const checkpointPath = store.receiptCheckpointPath(platform);
+        if (fs.existsSync(checkpointPath)) {
+          try {
+            const checkpoint = JSON.parse(await fs.promises.readFile(checkpointPath, "utf8"));
+            if (checkpoint && typeof checkpoint === "object") {
+              checkpoint.fingerprint = state.fingerprint;
+              if (checkpoint.receipts?.uploadStart?.fingerprint === invokedFingerprint) {
+                checkpoint.receipts.uploadStart = { ...checkpoint.receipts.uploadStart, fingerprint: state.fingerprint };
+              }
+              writeJsonAtomic(checkpointPath, checkpoint);
+            }
+          } catch {}
+        }
+      }
+      item.receipts = mergedReceipts;
       item.receiptTaskSpaceId = observation.taskSpaceId ?? item.taskSpaceId ?? null;
     }
     const videoReceipt = phase === "upload"
@@ -487,9 +582,119 @@ async function main() {
     && ["ready", "needs_mutation"].includes(state.platforms[platform].status);
   const advancementTasks = new Map();
 
-  function scheduleAdvance(platform) {
-    if (advancementTasks.has(platform)) return advancementTasks.get(platform);
-    const task = ui.enqueue(async () => {
+  async function recordCoverWaitFailure(platform, reason) {
+    const item = state.platforms[platform];
+    const observedAt = new Date().toISOString();
+    const blocker = {
+      code: BLOCKER.ACTION_FAILED,
+      message: reason,
+      retryable: true,
+      requiresUser: false,
+      evidence: { awaitCoverPath: args.awaitCoverPath, requiredAspects: requiredCoverAspectsForPlatform(platform) },
+    };
+    const observation = {
+      schemaVersion: 1,
+      platform,
+      phase: "cover_wait",
+      taskSpaceId: item.taskSpaceId ?? null,
+      taskSpace: item.taskSpaceName || undefined,
+      observedAt,
+      finalPublishClicked: false,
+      gates: { cover: { ok: false, evidence: { reason } } },
+      blocker,
+      evidence: { awaitCoverPath: args.awaitCoverPath },
+    };
+    const verdict = {
+      platform,
+      phase: "cover_wait",
+      taskSpaceId: item.taskSpaceId ?? null,
+      ready: false,
+      missing: ["cover"],
+      blocker,
+    };
+    item.status = "blocked";
+    await store.record(platform, "cover_wait", observation, verdict);
+    console.error(`[video-publisher-v2] ${platform} cover_wait: ${reason}`);
+  }
+
+  async function ensurePlatformCoverReady(platform) {
+    if (!deferCoverStartup || resolvedCoverPlatforms.has(platform)) return { ok: true };
+    const requiredAspects = requiredCoverAspectsForPlatform(platform);
+    if (!requiredAspects.length) {
+      resolvedCoverPlatforms.add(platform);
+      return { ok: true };
+    }
+    const manifestDir = path.dirname(args.awaitCoverPath);
+    const deadline = Date.now() + args.awaitCoverTimeoutSec * 1000;
+    console.error(`[video-publisher-v2] ${platform} awaiting cover aspects (${requiredAspects.join(",")}) from ${args.awaitCoverPath}`);
+    while (Date.now() <= deadline) {
+      if (inputChannelBroken || userControl) return { ok: false, aborted: true };
+      let manifest = null;
+      if (fs.existsSync(args.awaitCoverPath)) {
+        try {
+          manifest = JSON.parse(await fs.promises.readFile(args.awaitCoverPath, "utf8"));
+        } catch {
+          manifest = null;
+        }
+      }
+      if (manifest && typeof manifest === "object") {
+        let pending = false;
+        const resolvedPaths = {};
+        for (const aspect of requiredAspects) {
+          const entry = manifest.aspects?.[aspect];
+          const field = ASPECT_COVER_FIELD[aspect];
+          if (entry?.status === "failed") {
+            return { ok: false, reason: String(entry.error || `封面生成失败 (${aspect})`) };
+          }
+          const isReady = entry?.status === "ready" || (!entry && manifest.status === "ready");
+          if (!isReady) {
+            if (manifest.status === "failed") {
+              return { ok: false, reason: String(manifest.error || `封面生成失败 (${aspect})`) };
+            }
+            pending = true;
+            break;
+          }
+          const candidatePath = String(entry?.path || manifest.cover?.[field] || "").trim();
+          if (candidatePath) {
+            resolvedPaths[field] = path.isAbsolute(candidatePath) ? candidatePath : path.resolve(manifestDir, candidatePath);
+          }
+        }
+        if (!pending) {
+          return await coverSyncQueue.enqueue(async () => {
+            if (resolvedCoverPlatforms.has(platform)) return { ok: true };
+            const rawPkg = JSON.parse(await fs.promises.readFile(args.packagePath, "utf8"));
+            rawPkg.cover = { ...(rawPkg.cover || {}), uploadCustomCover: true };
+            let packageUpdated = false;
+            for (const [field, absolute] of Object.entries(resolvedPaths)) {
+              if (rawPkg.cover[field] !== absolute) {
+                rawPkg.cover[field] = absolute;
+                packageUpdated = true;
+              }
+            }
+            if (packageUpdated) writeJsonAtomic(args.packagePath, rawPkg);
+            pkg = readPackage(args.packagePath);
+            const coverErrors = validateCoverPackage(pkg, platform, { skipCoverFiles: false });
+            if (coverErrors.length > 0) {
+              return { ok: false, reason: coverErrors.join("; ") };
+            }
+            identity = await buildIdentity(pkg, { allowMissingCoverAssets: true, cachedVideo: identity.video });
+            await applyResolvedCoverIdentity(store, state, identity, args);
+            resolvedCoverPlatforms.add(platform);
+            if (runnablePlatforms.every(key => resolvedCoverPlatforms.has(key))) {
+              state.awaitingCover = false;
+              await store.save();
+            }
+            return { ok: true };
+          });
+        }
+      }
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    return { ok: false, reason: `等待封面超时 (${args.awaitCoverTimeoutSec}s): ${requiredAspects.join(", ")}` };
+  }
+
+  function enqueuePlatformMutationAndVerify(platform) {
+    return ui.enqueue(async () => {
       if (inputChannelBroken || userControl || !canAdvance(platform)) return;
 
       if (state.platforms[platform].status === "needs_mutation") {
@@ -510,7 +715,25 @@ async function main() {
         if (inputChannelBroken || userControl || terminalStatuses.has(state.platforms[platform].status)) return;
         await invoke(platform, "verify");
       }
-    }).then(
+    });
+  }
+
+  function scheduleAdvance(platform) {
+    if (advancementTasks.has(platform)) return advancementTasks.get(platform);
+    const runTask = (!deferCoverStartup || resolvedCoverPlatforms.has(platform))
+      ? enqueuePlatformMutationAndVerify(platform)
+      : (async () => {
+        if (inputChannelBroken || userControl || !canAdvance(platform)) return;
+        const coverReady = await ensurePlatformCoverReady(platform);
+        if (!coverReady.ok) {
+          if (!coverReady.aborted && !inputChannelBroken && !userControl) {
+            await recordCoverWaitFailure(platform, coverReady.reason);
+          }
+          return;
+        }
+        await enqueuePlatformMutationAndVerify(platform);
+      })();
+    const task = runTask.then(
       () => ({ platform, error: null }),
       error => ({ platform, error }),
     );

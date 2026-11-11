@@ -88,3 +88,36 @@ test("changing only Bilibili's 16:9 personal-space image changes the Bilibili fi
     await fs.promises.rm(root, { recursive: true, force: true });
   }
 });
+
+test("buildIdentity supports missing deferred covers and sidecar SHA-256 cache reuse", async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "video-publisher-deferred-identity-test-"));
+  try {
+    const videoPath = path.join(root, "demo.mp4");
+    const futureCover = path.join(root, "demo_3x4.png");
+    await fs.promises.writeFile(videoPath, "real-video-bytes");
+    const initial = await buildIdentity(
+      { videoPath, title: "Deferred", cover: { uploadCustomCover: true, vertical3x4Path: futureCover } },
+      { allowMissingCoverAssets: true },
+    );
+    assert.deepEqual(initial.missingCoverPaths, [futureCover]);
+    const statBig = await fs.promises.stat(videoPath, { bigint: true });
+    await fs.promises.writeFile(
+      path.join(root, "demo.video-fingerprint.json"),
+      JSON.stringify({
+        sourceFingerprint: {
+          path: videoPath,
+          size: Number(statBig.size),
+          mtimeNs: String(statBig.mtimeNs),
+          sha256: initial.video.sha256,
+        },
+      }),
+    );
+    await fs.promises.writeFile(futureCover, pngHeader(1080, 1440, 7));
+    const resolved = await buildIdentity({ videoPath, title: "Deferred", cover: { uploadCustomCover: true, vertical3x4Path: futureCover } });
+    assert.equal(resolved.contentFingerprint, initial.contentFingerprint);
+    assert.equal(resolved.video.sha256, initial.video.sha256);
+    assert.equal(resolved.assets.length, 1);
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
+});

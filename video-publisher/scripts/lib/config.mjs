@@ -56,8 +56,8 @@ export function defaultConfig() {
       },
     },
     execution: {
-      checkConcurrency: 4,
-      uploadConcurrency: 4,
+      checkConcurrency: 5,
+      uploadConcurrency: 5,
     },
     cover: {
       uploadExistingByDefault: false,

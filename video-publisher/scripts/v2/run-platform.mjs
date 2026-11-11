@@ -105,7 +105,8 @@ const packagePath = path.resolve(rawPackagePath);
 if (!fs.existsSync(packagePath)) throw new Error(`Package JSON not found: ${packagePath}`);
 const pkg = readPackage(packagePath);
 const media = inspectMediaFile(pkg.videoPath);
-const errors = [...validators[platform](pkg), ...validateMediaForPlatform(pkg, platform, media)];
+const deferCover = process.env.VIDEO_PUBLISHER_V2_DEFER_COVER === "1" && phase !== "mutate";
+const errors = [...validators[platform](pkg, { skipCoverFiles: deferCover }), ...validateMediaForPlatform(pkg, platform, media)];
 if (errors.length) throw new Error(`Package preflight failed for ${platform}: ${errors.join("; ")}`);
 
 const header = [

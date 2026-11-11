@@ -174,8 +174,8 @@ try {
         },
       },
       execution: {
-        checkConcurrency: positive(options["--check-concurrency"], 4, "--check-concurrency"),
-        uploadConcurrency: positive(options["--upload-concurrency"], 4, "--upload-concurrency"),
+        checkConcurrency: positive(options["--check-concurrency"], 5, "--check-concurrency"),
+        uploadConcurrency: positive(options["--upload-concurrency"], 5, "--upload-concurrency"),
       },
       cover: {
         uploadExistingByDefault: options["--upload-existing-cover-by-default"] === true,

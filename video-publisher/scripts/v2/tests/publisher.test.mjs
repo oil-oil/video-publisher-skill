@@ -887,3 +887,261 @@ test("two different jobs under different state roots cannot split platform owner
   assert.equal(stateFiles.length,1,"the refused job must not write state");
   assert.equal(fs.existsSync(path.join(process.env.VIDEO_PUBLISHER_V2_LOCK_ROOT,"publisher","orchestrator.lock")),false);
 });
+
+test("await-cover overlaps video upload with cover generation and unblocks per-platform aspects in a single pass", async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "video-publisher-v2-await-cover-stream-test-"));
+  try {
+    const log = path.join(root, "events.ndjson");
+    const videoPath = path.join(root, "sample-video.mp4");
+    const cover3x4 = path.join(root, "sample_3x4.png");
+    const cover4x3 = path.join(root, "sample_4x3.png");
+    const cover16x9 = path.join(root, "sample_16x9.png");
+    const coverStatePath = path.join(root, "sample.cover-state.json");
+    const packagePath = path.join(root, "package.json");
+    const configPath = path.join(root, "config.json");
+    await fs.promises.writeFile(videoPath, mp4WithDuration(30));
+    await fs.promises.writeFile(configPath, JSON.stringify({
+      schemaVersion: 2,
+      onboarding: { completed: true },
+      sourceDirectory: root,
+      availablePlatforms: ["xiaohongshu", "bilibili"],
+      defaultPlatforms: ["xiaohongshu", "bilibili"],
+      declarations: { originalityPolicy: "all_videos_original" },
+      execution: { checkConcurrency: 5, uploadConcurrency: 5 },
+    }));
+    await fs.promises.writeFile(packagePath, JSON.stringify({
+      videoPath,
+      title: "并行上传与生图",
+      xhsTopics: ["AI"],
+      bilibiliDescription: "并行上传与生图",
+      bilibiliTags: ["AI"],
+      cover: {
+        uploadCustomCover: true,
+        vertical3x4Path: cover3x4,
+        horizontal4x3Path: cover4x3,
+        horizontal16x9Path: cover16x9,
+      },
+    }));
+    await fs.promises.writeFile(coverStatePath, JSON.stringify({
+      status: "generating",
+      aspects: {
+        "3x4": { status: "generating", path: cover3x4 },
+        "4x3": { status: "generating", path: cover4x3 },
+        "16x9": { status: "generating", path: cover16x9 },
+      },
+    }));
+
+    // Simulate 3:4 cover finishing QA while upload is running, and 4:3 + 16:9 finishing 450ms later.
+    const coverGenerator = (async () => {
+      await new Promise(resolve => setTimeout(resolve, 120));
+      await fs.promises.writeFile(cover3x4, pngHeader(1080, 1440, 11));
+      await fs.promises.writeFile(coverStatePath, JSON.stringify({
+        status: "generating",
+        aspects: {
+          "3x4": { status: "ready", path: cover3x4 },
+          "4x3": { status: "generating", path: cover4x3 },
+          "16x9": { status: "generating", path: cover16x9 },
+        },
+      }));
+      await new Promise(resolve => setTimeout(resolve, 450));
+      await fs.promises.writeFile(cover4x3, pngHeader(1440, 1080, 22));
+      await fs.promises.writeFile(cover16x9, pngHeader(1280, 720, 23));
+      await fs.promises.writeFile(coverStatePath, JSON.stringify({
+        status: "ready",
+        aspects: {
+          "3x4": { status: "ready", path: cover3x4 },
+          "4x3": { status: "ready", path: cover4x3 },
+          "16x9": { status: "ready", path: cover16x9 },
+        },
+      }));
+    })();
+
+    const [result] = await Promise.all([
+      run(process.execPath, [
+        path.join(V2_DIR, "publisher.mjs"),
+        "--package", packagePath,
+        "--platforms", "xiaohongshu,bilibili",
+        "--job-id", "stream-cover-job",
+        "--state-root", root,
+        "--await-cover", coverStatePath,
+        "--await-cover-timeout", "10",
+      ], {
+        env: {
+          ...process.env,
+          VIDEO_PUBLISHER_CONFIG: configPath,
+          VIDEO_PUBLISHER_V2_RUNNER: path.join(DIR, "mock-runner.mjs"),
+          VIDEO_PUBLISHER_V2_MOCK_LOG: log,
+          VIDEO_PUBLISHER_V2_MOCK_DELAYS: JSON.stringify({
+            "xiaohongshu:upload": 60,
+            "bilibili:upload": 60,
+          }),
+        },
+      }),
+      coverGenerator,
+    ]);
+
+    assert.equal(result.code, 0, `${result.stderr}\n${result.stdout}`);
+    const summary = JSON.parse(result.stdout);
+    assert.equal(summary.ready, true);
+    assert.equal(summary.platforms.xiaohongshu.ready, true);
+    assert.equal(summary.platforms.bilibili.ready, true);
+
+    const events = (await fs.promises.readFile(log, "utf8")).trim().split(/\n/).map(line => JSON.parse(line));
+    // Prove upload started before 3x4 cover existed, and xiaohongshu mutated BEFORE bilibili's 4x3 cover even finished!
+    const xhsVerifyEnd = events.find(item => item.platform === "xiaohongshu" && item.phase === "verify" && item.event === "end").at;
+    const biliMutateStart = events.find(item => item.platform === "bilibili" && item.phase === "mutate" && item.event === "start").at;
+    assert.ok(xhsVerifyEnd < biliMutateStart, { xhsVerifyEnd, biliMutateStart });
+    // Prove zero duplicate mutate/verify passes (single pass per platform)
+    assert.equal(events.filter(item => item.platform === "xiaohongshu" && item.phase === "mutate" && item.event === "start").length, 1);
+    assert.equal(events.filter(item => item.platform === "bilibili" && item.phase === "mutate" && item.event === "start").length, 1);
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("await-cover isolates a failed aspect while preserving uploaded video for instant resume", async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "video-publisher-v2-await-cover-partial-fail-"));
+  try {
+    const log = path.join(root, "events.ndjson");
+    const videoPath = path.join(root, "sample-video.mp4");
+    const cover3x4 = path.join(root, "sample_3x4.png");
+    const cover4x3 = path.join(root, "sample_4x3.png");
+    const cover16x9 = path.join(root, "sample_16x9.png");
+    const coverStatePath = path.join(root, "sample.cover-state.json");
+    const packagePath = path.join(root, "package.json");
+    const configPath = path.join(root, "config.json");
+    await fs.promises.writeFile(videoPath, mp4WithDuration(30));
+    await fs.promises.writeFile(cover3x4, pngHeader(1080, 1440, 33));
+    await fs.promises.writeFile(cover16x9, pngHeader(1280, 720, 34));
+    await fs.promises.writeFile(configPath, JSON.stringify({
+      schemaVersion: 2,
+      onboarding: { completed: true },
+      sourceDirectory: root,
+      availablePlatforms: ["xiaohongshu", "bilibili"],
+      defaultPlatforms: ["xiaohongshu", "bilibili"],
+      declarations: { originalityPolicy: "all_videos_original" },
+      execution: { checkConcurrency: 5, uploadConcurrency: 5 },
+    }));
+    await fs.promises.writeFile(packagePath, JSON.stringify({
+      videoPath,
+      title: "封面单幅失败恢复",
+      xhsTopics: ["AI"],
+      bilibiliDescription: "封面单幅失败恢复",
+      bilibiliTags: ["AI"],
+      cover: {
+        uploadCustomCover: true,
+        vertical3x4Path: cover3x4,
+        horizontal4x3Path: cover4x3,
+        horizontal16x9Path: cover16x9,
+      },
+    }));
+    await fs.promises.writeFile(coverStatePath, JSON.stringify({
+      status: "failed",
+      aspects: {
+        "3x4": { status: "ready", path: cover3x4 },
+        "4x3": { status: "failed", error: "4:3 cover API error" },
+        "16x9": { status: "ready", path: cover16x9 },
+      },
+    }));
+
+    const first = await run(process.execPath, [
+      path.join(V2_DIR, "publisher.mjs"),
+      "--package", packagePath,
+      "--platforms", "xiaohongshu,bilibili",
+      "--job-id", "partial-cover-job",
+      "--state-root", root,
+      "--await-cover", coverStatePath,
+      "--await-cover-timeout", "5",
+    ], {
+      env: {
+        ...process.env,
+        VIDEO_PUBLISHER_CONFIG: configPath,
+        VIDEO_PUBLISHER_V2_RUNNER: path.join(DIR, "mock-runner.mjs"),
+        VIDEO_PUBLISHER_V2_MOCK_LOG: log,
+      },
+    });
+    assert.equal(first.code, 10, `${first.stderr}\n${first.stdout}`);
+    const partialSummary = JSON.parse(first.stdout);
+    assert.equal(partialSummary.platforms.xiaohongshu.ready, true);
+    assert.equal(partialSummary.platforms.bilibili.ready, false);
+    assert.match(partialSummary.platforms.bilibili.blocker.message, /4:3 cover API error/);
+
+    // Now fix 4x3 cover and resume bilibili: video must NOT be re-uploaded!
+    await fs.promises.writeFile(cover4x3, pngHeader(1440, 1080, 44));
+    const resumeLog = path.join(root, "resume.ndjson");
+    const resumed = await run(process.execPath, [
+      path.join(V2_DIR, "publisher.mjs"),
+      "--package", packagePath,
+      "--platform", "bilibili",
+      "--job-id", "partial-cover-job",
+      "--state-root", root,
+      "--operation", "resume",
+      "--no-cleanup-stale-spaces",
+    ], {
+      env: {
+        ...process.env,
+        VIDEO_PUBLISHER_CONFIG: configPath,
+        VIDEO_PUBLISHER_V2_RUNNER: path.join(DIR, "mock-runner.mjs"),
+        VIDEO_PUBLISHER_V2_MOCK_LOG: resumeLog,
+        VIDEO_PUBLISHER_V2_MOCK_EXISTING_READY: "1",
+      },
+    });
+    assert.equal(resumed.code, 0, `${resumed.stderr}\n${resumed.stdout}`);
+    const resumeEvents = (await fs.promises.readFile(resumeLog, "utf8")).trim().split(/\n/).map(line => JSON.parse(line));
+    assert.equal(resumeEvents.some(item => ["upload_start", "upload"].includes(item.phase)), false, "resume must reuse uploaded video without re-uploading");
+    const finalState = JSON.parse(await fs.promises.readFile(path.join(root, "partial-cover-job", "state.json"), "utf8"));
+    assert.equal(finalState.status, "ready");
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("subset inspect succeeds when an unselected sibling platform cover file is not yet on disk", async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "video-publisher-v2-subset-missing-sibling-cover-"));
+  try {
+    const videoPath = path.join(root, "sample.mp4");
+    const cover3x4 = path.join(root, "sample_3x4.png");
+    const missing4x3 = path.join(root, "missing_4x3.png");
+    const packagePath = path.join(root, "package.json");
+    const configPath = path.join(root, "config.json");
+    await fs.promises.writeFile(videoPath, mp4WithDuration(15));
+    await fs.promises.writeFile(cover3x4, pngHeader(960, 1280, 1));
+    await fs.promises.writeFile(configPath, JSON.stringify({
+      schemaVersion: 2,
+      onboarding: { completed: true },
+      sourceDirectory: root,
+      availablePlatforms: ["xiaohongshu", "bilibili"],
+      defaultPlatforms: ["xiaohongshu", "bilibili"],
+      declarations: { originalityPolicy: "all_videos_original" },
+    }));
+    await fs.promises.writeFile(packagePath, JSON.stringify({
+      videoPath,
+      title: "子集检查容忍未选平台缺失封面",
+      xhsTopics: ["AI"],
+      bilibiliDescription: "说明",
+      bilibiliTags: ["AI"],
+      cover: {
+        uploadCustomCover: true,
+        vertical3x4Path: cover3x4,
+        horizontal4x3Path: missing4x3,
+      },
+    }));
+
+    const res = await run(process.execPath, [
+      path.join(V2_DIR, "publisher.mjs"),
+      "--package", packagePath,
+      "--platform", "xiaohongshu",
+      "--inspect-only",
+      "--state-root", root,
+    ], {
+      env: {
+        ...process.env,
+        VIDEO_PUBLISHER_CONFIG: configPath,
+        VIDEO_PUBLISHER_V2_RUNNER: path.join(DIR, "mock-runner.mjs"),
+      },
+    });
+    assert.equal(res.code, 0, `${res.stderr}\n${res.stdout}`);
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
+});

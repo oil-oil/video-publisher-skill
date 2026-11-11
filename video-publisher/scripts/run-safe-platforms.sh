@@ -12,7 +12,7 @@ if [[ $# -lt 1 ]]; then
   echo "         --keep-space --close-on-complete --cleanup-stale-spaces --no-cleanup-stale-spaces" >&2
   echo "         --space-prefix NAME --space-name NAME --space-suffix SUFFIX" >&2
   echo "         --cleanup-name NAME --cleanup-prefix PREFIX --state-root DIR" >&2
-  echo "         --check-concurrency N --upload-concurrency N" >&2
+  echo "         --check-concurrency N --upload-concurrency N --await-cover FILE --await-cover-timeout SEC" >&2
   exit 2
 fi
 

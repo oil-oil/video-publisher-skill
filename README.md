@@ -132,6 +132,7 @@ node --test video-publisher/scripts/tests/*.test.mjs video-publisher/scripts/v2/
 - [配置与 onboarding](video-publisher/references/configuration.md)
 - [Ego Lite 工作流](video-publisher/references/ego-browser-workflow.md)
 - [调度器与诊断命令](video-publisher/references/scripts.md)
+- [《AI Agent 浏览器自动化与电脑自动化指南》](https://book.oiloil.org/articles/agent-browser-automation?utm_source=github&utm_medium=referral&utm_campaign=video-publisher-readme)与[《如何从 0 到 1 开始做自媒体》](https://book.oiloil.org/articles/how-to-start-self-media?utm_source=github&utm_medium=referral&utm_campaign=video-publisher-readme)（Oil Book 相关章节）
 
 ## License
 

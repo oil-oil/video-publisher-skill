@@ -11,12 +11,17 @@ function wechatCoverRatioMatches(image, ratio) {
     && Math.abs(image.width / image.height - width / height) < 0.01;
 }
 
+function wechatCoverCropMatches(crop, ratio) {
+  return !crop?.applicable || (crop.fullImageVisible === true && wechatCoverRatioMatches(crop, ratio));
+}
+
 function wechatCoverPreviewMatches(preview, asset, selectedFile, previousKey) {
   return preview?.editorMatched === true && preview.image?.loaded === true
     && selectedFile?.name === path.basename(asset.path)
     && selectedFile?.size === fs.statSync(asset.path).size
     && Boolean(preview.image.sourceKey) && preview.image.sourceKey !== previousKey
-    && wechatCoverRatioMatches(preview.image, asset.ratio);
+    && wechatCoverRatioMatches(preview.image, asset.ratio)
+    && wechatCoverCropMatches(preview.crop, asset.ratio);
 }
 
 function wechatCoverReceiptMatches(asset, receipt, images) {
@@ -26,6 +31,7 @@ function wechatCoverReceiptMatches(asset, receipt, images) {
     && receipt.previewProof?.editorMatched === true
     && receipt.previewProof.image?.loaded === true
     && wechatCoverRatioMatches(receipt.previewProof.image, asset.ratio)
+    && wechatCoverCropMatches(receipt.previewProof.crop, asset.ratio)
     && (images || []).some(image => image.url === receipt.afterUrl
       && wechatCoverRatioMatches(image, asset.ratio));
 }
@@ -52,7 +58,14 @@ async function probeWechatCoverEditor(asset) {
     if(!image)return {editorMatched:true,image:null};
     const src=image.currentSrc||image.src||'';let hash=2166136261;
     for(let i=0;i<src.length;i++)hash=Math.imul(hash^src.charCodeAt(i),16777619);
-    return {editorMatched:true,image:{width:image.naturalWidth,height:image.naturalHeight,loaded:image.complete&&image.naturalWidth>0,sourceKey:(hash>>>0).toString(16)}};
+    const crops=dialogs.filter(dialog=>heading(dialog)==='裁剪封面图'&&editor.contains(dialog));
+    const cropRoot=crops.length===1?crops[0]:editor;
+    const canvas=owned(cropRoot,'.crop-image-container canvas.cr-image').find(visible);
+    const viewport=owned(cropRoot,'.crop-image-container .cr-viewport').find(visible);
+    const rendered=canvas?.getBoundingClientRect(),bounds=viewport?.getBoundingClientRect();
+    const crop={applicable:Boolean(crops.length||canvas||viewport),width:bounds?.width||0,height:bounds?.height||0,
+      fullImageVisible:Boolean(crops.length<=1&&rendered&&bounds&&['width','height','left','top'].every(key=>Math.abs(rendered[key]-bounds[key])<=2))};
+    return {editorMatched:true,image:{width:image.naturalWidth,height:image.naturalHeight,loaded:image.complete&&image.naturalWidth>0,sourceKey:(hash>>>0).toString(16)},crop};
   `));
 }
 

@@ -398,6 +398,21 @@ async function ensureXhsOriginal() {
   return inspected.gates.original.ok ? { ok: true, control, modalResult } : { ok: false, reason: 'xiaohongshu original declaration did not persist', control, modalResult };
 }
 
+async function waitForXhsCoverAcceptance(before) {
+  for (let index = 0; index < 60; index += 1) {
+    const current = await js(String.raw`(() => {
+      const el=document.querySelector('.cover-plugin-preview .default.row, .cover-plugin-preview .default.column');
+      const text=document.body.innerText||'';
+      const visible=node=>{const r=node.getBoundingClientRect(),s=getComputedStyle(node);return r.width>4&&r.height>4&&s.display!=='none'&&s.visibility!=='hidden'};
+      const editorOpen=[...document.querySelectorAll('.main-cover-editor-modal,.d-modal,[role="dialog"]')].some(node=>visible(node)&&(node.matches('.main-cover-editor-modal')||/设置封面/.test(node.innerText||node.textContent||'')));
+      return {bg:el?getComputedStyle(el).backgroundImage:'',uploading:/封面上传中|正在上传|处理中/.test(text),editorOpen};
+    })()`);
+    if (current.bg && current.bg !== 'none' && current.bg !== before && !current.uploading && !current.editorOpen) return {ok:true,after:current.bg};
+    await wait(2);
+  }
+  return {ok:false,reason:'xiaohongshu cover was not accepted or editor did not close'};
+}
+
 async function uploadXhsCover() {
   if (!xhsCustomCover) return { ok: true, skipped: true };
   const before = await js(String.raw`(() => { const el=document.querySelector('.cover-plugin-preview .default.row, .cover-plugin-preview .default.column'); return el ? getComputedStyle(el).backgroundImage : '' })()`);
@@ -614,15 +629,10 @@ async function uploadXhsCover() {
     button.click(); return {ok:true}
   })()`);
   if (!confirmed.ok) return confirmed;
-  let after = '';
-  for (let index = 0; index < 60; index += 1) {
-    const current = await js(String.raw`(() => { const el=document.querySelector('.cover-plugin-preview .default.row, .cover-plugin-preview .default.column'); const text=document.body.innerText||''; return {bg:el?getComputedStyle(el).backgroundImage:'',uploading:/封面上传中|正在上传|处理中/.test(text)} })()`);
-    after = current.bg;
-    if (after && after !== before && !current.uploading) break;
-    await wait(2);
-  }
+  const accepted = await waitForXhsCoverAcceptance(before);
+  if (!accepted.ok) return {...accepted,before};
+  const after = accepted.after;
   await removeExactStaleMask(/设置封面/);
-  if (!after || after === before) return { ok: false, reason: 'xiaohongshu cover preview did not change', before, after };
   const url = (after.match(/url\(["']?([^"')]+)/) || [])[1] || after;
   const acceptedImage=await readXhsAcceptedImage(url);
   if(!acceptedImage.loaded||Math.abs(acceptedImage.width/acceptedImage.height-0.75)>=0.01)return {ok:false,reason:'xiaohongshu accepted cover is not 3:4',acceptedImage};

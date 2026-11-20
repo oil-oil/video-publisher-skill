@@ -84,6 +84,7 @@ When enabled, inspect the live cover controls. The older editor has separate per
 2. If a material popover appears, use its unique visible `直接编辑` control to enter the editor. Match the parent dialog by its own heading, excluding nested crop-dialog inputs and buttons.
 3. Inject the file through its CDP object id; top-document `uploadFile` cannot reach it.
 4. Require the native FileList to match this slot’s filename and size. Wait for a new, fully loaded `.single-cover-uploader-wrap img` with the slot’s actual intrinsic ratio.
+   When the active editor exposes a crop canvas or viewport, require both, verify the viewport ratio, and require the rendered image bounds to match the viewport within two CSS pixels. Do not accept a zoomed or clipped image merely because its source has the right ratio.
 5. If `裁剪封面图` is visible, click its visible `确定` first.
 6. Wait for the parent editor to become visible, then click its visible `确认`.
 7. Keep crop confirmation scoped to the crop dialog and parent confirmation scoped to the matched parent editor.

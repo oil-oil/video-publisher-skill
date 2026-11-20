@@ -22,7 +22,7 @@ After a browser restart, refocus the rich description editor and verify `documen
 
 ## 上传期间提前填写
 
-抖音允许在视频仍显示“上传过程中”时编辑发布信息。生产流程先用 `upload_start` 注入或恢复视频；只有 fresh inspection 同时证明上传仍活跃、标题输入、描述编辑器、`#添加话题` 控件和同步发布设置均可用，才返回 `editable_uploading`。
+抖音允许在视频仍显示“上传过程中”时编辑发布信息。生产流程先用 `upload_start` 注入或恢复视频；只有 fresh inspection 同时证明上传仍活跃、标题输入、描述编辑器和 `#添加话题` 控件可用，才返回 `editable_uploading`。账号没有同步发布控件时，不阻塞提前填写。
 
 随后由全局单宽 UI 队列执行 `prefill`，复用正式 mutation 的幂等标题、描述、话题和同步设置修复。`prefill` 不上传封面、不把 video gate 标为成功，也不执行 final verification。完成后正式 `upload` 必须继续等待“上传成功”稳定出现，之后才允许封面、剩余 mutation 和 verify。
 
@@ -50,6 +50,8 @@ The description may truthfully contain a requested topic word such as `HTML` or 
 
 Select `不同时发布` for the simultaneous-publication setting unless the package explicitly authorizes cross-posting. Verify the selected radio state; do not infer it from a nearby Toutiao label.
 
+Keep the central `settings` gate. When the live editable uploader exposes no synchronization controls, record `applicable: false` rather than claiming synchronization was disabled. Present controls must still prove `不同时发布` is selected and Toutiao synchronization is off; missing or unreadable state on a present control blocks readiness. The final independent inspection repeats this check after upload completion.
+
 ## Custom Covers
 
 When enabled, upload both assets in this order:
@@ -60,6 +62,8 @@ landscape 4:3
 ```
 
 Use the platform’s portrait upload, then `设置横封面`, then complete the landscape flow. Ignore stale hidden/leave-active dialogs.
+
+Activate the page lifecycle before cover work. Advance through one visible enabled button in the active cover dialog, propagate click failures, and wait for the actual landscape step or editor closure before recording completion.
 
 The main portrait and landscape cards must expose two distinct accepted URLs. A temporary mirrored URL in both cards is not success. Persist both receipts and require verify to match them.
 
@@ -75,7 +79,7 @@ correct draft identity
 video fully uploaded
 exact title and body
 the exact requested real topic entities, no residue or duplicates
-不同时发布 selected
+不同时发布 selected when controls are exposed; otherwise verified not applicable
 two distinct custom-cover receipts when enabled
 no blocking dialog
 visible enabled 发布 button

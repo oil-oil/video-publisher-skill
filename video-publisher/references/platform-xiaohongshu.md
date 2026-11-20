@@ -54,6 +54,8 @@ The current editor exposes a hover-only `.cover-edit-entry`. Pointer movement ca
 
 Accept the cover only when the main editor exposes the uploaded preview URL, normally on `ros-preview.xhscdn.com`, and no cover dialog blocks the page. Store that URL in the receipt and require the verify phase to find it again.
 
+After confirmation, wait for a changed non-empty preview, completed cover processing, and the visible editor to close together before issuing the receipt. A timeout in any condition is a failure, even if the preview URL has already changed. Preserve the selected-file, actual 3:4 crop, and accepted-image dimension checks.
+
 ## Required Gates
 
 ```text

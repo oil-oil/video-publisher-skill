@@ -134,6 +134,18 @@ node --test video-publisher/scripts/tests/*.test.mjs video-publisher/scripts/v2/
 - [调度器与诊断命令](video-publisher/references/scripts.md)
 - [《AI Agent 浏览器自动化与电脑自动化指南》](https://book.oiloil.org/articles/agent-browser-automation?utm_source=github&utm_medium=referral&utm_campaign=video-publisher-readme)与[《如何从 0 到 1 开始做自媒体》](https://book.oiloil.org/articles/how-to-start-self-media?utm_source=github&utm_medium=referral&utm_campaign=video-publisher-readme)（Oil Book 相关章节）
 
+---
+
+<p align="center">
+  <a href="https://studio.oiloil.org/?utm_source=github&utm_medium=readme&utm_campaign=video-publisher-skill">
+    <img src="https://raw.githubusercontent.com/oil-oil/oil-studio-skill/main/assets/readme/creator-card.png" width="100%" alt="Oil Studio：给自媒体创作者的 Mac 录屏与口播精剪软件">
+  </a>
+</p>
+
+<p align="center">
+  <strong><a href="https://studio.oiloil.org/?utm_source=github&utm_medium=readme&utm_campaign=video-publisher-skill">录屏、自动缩放、按文字剪口播、加字幕，一个 Mac App 搞定 → 了解 Oil Studio</a></strong>
+</p>
+
 ## License
 
 [MIT](LICENSE)
